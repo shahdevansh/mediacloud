@@ -68,7 +68,8 @@ mongodb_gridfs:
     ## media_sets_id of the media set to display on the Dashboard home page
     ##default_media_set: 1
 
-    ### Uncomment one or more storage methods to store downloads to; default is just "tar"
+    ### Uncomment one or more storage methods to store downloads to; default is just "tar".
+    ### The path to the last download storage method listed below will be stored in the database.
     #download_storage_locations:
         ### store downloads to Tar archives
         #- tar
