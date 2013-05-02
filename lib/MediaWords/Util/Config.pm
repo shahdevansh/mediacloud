@@ -73,6 +73,7 @@ sub set_defaults
     $config->{ mediawords }->{ language }                         ||= "en_US_and_ru_RU";
     $config->{ mediawords }->{ always_show_stack_traces }         ||= "no";
     $config->{ mediawords }->{ disable_json_top_500_words_cache } ||= "no";
+    $config->{ mediawords }->{ download_storage_locations }       ||= [ 'tar' ];
     $config->{ session }->{ storage }                             ||= "$ENV{HOME}/tmp/mediacloud-session";
 
     return $config;
