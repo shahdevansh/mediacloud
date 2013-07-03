@@ -23,6 +23,7 @@ use MediaWords::DBI::Media;
 use MediaWords::Util::CSV;
 use MediaWords::Util::Colors;
 use MediaWords::Util::SQL;
+use MediaWords::Util::Tags;
 
 # max and mind node sizes for gexf dump
 use constant MAX_NODE_SIZE => 50;
@@ -40,6 +41,7 @@ my $_media_type_color_map;
 my $_dump_version;
 my $_dump_label;
 my $_dump_media;
+my $_dump_tag;
 
 # attributes to include in gexf dump
 my $_media_static_gexf_attribute_types = {
@@ -62,6 +64,11 @@ my $_parent_dump_dir;
 sub set_dump_label
 {
     ( $_dump_label ) = @_;
+
+    if ( $_dump_tag )
+    {
+        $_dump_label .= "_$_dump_tag";
+    }
 }
 
 sub get_dump_label
@@ -156,7 +163,7 @@ sub write_link_counts
 
     replace_table_contents( $db, 'controversy_story_link_counts_dump',
         "select count(distinct cl.stories_id) link_count, ref_stories_id " .
-          "  from controversy_links_cross_media cl, stories s, stories r " .
+          "  from dump_controversy_links_cross_media cl, stories s, stories r " .
           "  where cl.stories_id = s.stories_id and cl.ref_stories_id = r.stories_id and " .
           "    ( s.publish_date between '$start_date' and '$end_date'::timestamp - interval '1 second' ) and " .
           "    s.publish_date > r.publish_date - interval '1 day' and " .
@@ -164,7 +171,7 @@ sub write_link_counts
 
     replace_table_contents( $db, 'controversy_story_outlink_counts_dump',
         "select count(distinct cl.ref_stories_id) outlink_count, cl.stories_id " .
-          "  from controversy_links_cross_media cl, stories s, stories r " .
+          "  from dump_controversy_links_cross_media cl, stories s, stories r " .
           "  where cl.stories_id = s.stories_id and cl.ref_stories_id = r.stories_id and " .
           "    ( s.publish_date between '$start_date' and '$end_date'::timestamp - interval '1 second' ) and " .
 "    cl.controversies_id = $controversy->{ controversies_id } and s.publish_date > r.publish_date - interval '1 day' "
@@ -205,7 +212,7 @@ select distinct s.stories_id, s.title, s.url, s.publish_date,
         m.name media_name, m.url media_url, m.media_id, cs.link_weight, 
         coalesce( lc.link_count, 0) link_count,  coalesce( olc.outlink_count, 0) outlink_count, 
         coalesce( lc.link_count, 0) + coalesce( olc.outlink_count, 0) total_link_count $tag_clause_list
-	from stories s, media m, controversy_stories cs  
+	from stories s, media m, dump_controversy_stories cs  
 	    left join controversy_story_link_counts_dump_${ dump_version } as lc on ( cs.stories_id = lc.ref_stories_id )
 	    left join controversy_story_outlink_counts_dump_${ dump_version } as olc on ( cs.stories_id = olc.stories_id )
 	where cs.stories_id = s.stories_id and s.media_id = m.media_id and cs.controversies_id = $cid and 
@@ -226,7 +233,7 @@ select distinct cl.stories_id source_stories_id, ss.title source_title, ss.url s
         sm.name source_media_name, sm.url source_media_url, sm.media_id source_media_id,
 		cl.ref_stories_id ref_stories_id, rs.title ref_title, rs.url ref_url, rm.name ref_media_name, rm.url ref_media_url, 
 		rm.media_id ref_media_id
-	from controversy_links_cross_media cl, stories ss, media sm, stories rs, media rm
+	from dump_controversy_links_cross_media cl, stories ss, media sm, stories rs, media rm
 	where cl.stories_id = ss.stories_id and ss.media_id = sm.media_id and cl.ref_stories_id = rs.stories_id and rs.media_id = rm.media_id and 
 	  ( ss.publish_date between '$start_date' and '$end_date'::timestamp - interval '1 second' ) and
       ss.publish_date > rs.publish_date - interval '1 day' and
@@ -376,7 +383,7 @@ sub write_controversy_date_counts_dump
     write_dump_as_csv( $db, $controversy, 'controversy_date_counts_dump', <<END );
 select all_weeks.publish_week $tag_fields_list
     from ( select distinct date_trunc( 'week', s.publish_date ) publish_week
-             from stories s join controversy_stories cs on ( s.stories_id = cs.stories_id and controversies_id = $cid ) ) all_weeks
+             from stories s join dump_controversy_stories cs on ( s.stories_id = cs.stories_id and controversies_id = $cid ) ) all_weeks
          $tag_queries_list
          where all_weeks.publish_week between '$start_date' and '$end_date'::timestamp - interval '1 second'
          order by all_weeks.publish_week
@@ -418,6 +425,8 @@ sub replace_table_contents
     die( "table '$table' must end in 'dump'" ) if ( $table !~ /dump$/ );
 
     print STDERR "writing ${ table }_${ version } ...\n";
+
+    $db->query( "drop table if exists ${ table }_${ version }" );
 
     $db->query( "create temporary table ${ table }_${ version } as $query" );
 }
@@ -816,7 +825,7 @@ sub write_post_dated_links_dump
 
     write_dump_as_csv( $db, $controversy, 'controversy_post_dated_links_dump', <<END );
 select count(*) post_dated_links, sb.stories_id, min( sb.url ) url, min( sb.publish_date ) publish_date 
-    from stories sa, stories sb, controversy_links_cross_media cl 
+    from stories sa, stories sb, dump_controversy_links_cross_media cl 
     where sa.stories_id = cl.stories_id and sb.stories_id = cl.ref_stories_id and 
         sa.publish_date < sb.publish_date - interval '1 day' and 
         not ( sa.url like '%google.search%' ) and
@@ -835,7 +844,7 @@ sub write_post_dated_stories_dump
 select distinct sa.stories_id, sa.url, sa.publish_date, 
         count(sa.stories_id) OVER (PARTITION BY sb.stories_id) post_dated_stories, sb.stories_id ref_stories_id, 
         sb.url ref_url, sb.publish_date ref_publish_date 
-    from stories sa, stories sb, controversy_links_cross_media cl 
+    from stories sa, stories sb, dump_controversy_links_cross_media cl 
     where sa.stories_id = cl.stories_id and sb.stories_id = cl.ref_stories_id and 
         sa.publish_date < sb.publish_date - interval '1 day' and 
         not ( sa.url like '%sopa.google.search%' ) and
@@ -853,7 +862,7 @@ sub write_media_domains_dump
     my $res = $db->query( <<END );
 select m.* from media m
     where m.media_id in 
-        ( select s.media_id from stories s, controversy_stories cs
+        ( select s.media_id from stories s, dump_controversy_stories cs
               where s.stories_id = cs.stories_id and 
                   cs.controversies_id = $controversy->{ controversies_id } )
     order by m.media_id
@@ -900,8 +909,8 @@ select sa.title, sa.stories_id stories_id_a, sa.publish_date publish_date_a, sa.
         sa.media_id media_id_a, ma.url media_url_a, ma.name media_name_a,
         sb.stories_id stories_id_b, sb.publish_date publish_date_b, sb.url story_url_b,
         sb.media_id media_id_b, mb.url media_url_b, mb.name media_name_b
-    from controversy_stories csa, stories sa, media ma,
-        controversy_stories csb, stories sb, media mb
+    from dump_controversy_stories csa, stories sa, media ma,
+        dump_controversy_stories csb, stories sb, media mb
     where csa.controversies_id = $controversy->{ controversies_id } and 
         csa.stories_id = sa.stories_id and sa.media_id = ma.media_id and
         csb.controversies_id = csa.controversies_id and 
@@ -921,8 +930,6 @@ sub generate_period_dump
     set_dump_label( $dump_label );
 
     print "generating $dump_label...\n";
-
-    my $db = MediaWords::DB::connect_to_db;
 
     my $controversy = $db->find_by_id( 'controversies', $controversies_id )
       || die( "Unable to find controversy '$controversies_id'" );
@@ -1062,9 +1069,46 @@ sub write_cleanup_dumps
     write_dup_stories_dump( $db, $controversy );
 }
 
+# create dump_controversy_stories and dump_controversy_link_cross_media to point either directly to
+# the relevant tables or to point onto to stories that match the given tag
+sub setup_dump_tables
+{
+    my ( $db, $tag_name ) = @_;
+
+    if ( !$tag_name )
+    {
+        for my $t ( qw(controversy_stories controversy_links_cross_media) )
+        {
+            $db->query( "create temp view dump_$t as select * from $t" );
+        }
+        return;
+    }
+
+    my $tag = MediaWords::Util::Tags::lookup_tag( $db, $tag_name );
+
+    die( "unknown tag '$tag'" ) unless ( $tag );
+
+    $db->query( <<END, $tag->{ tags_id } );
+create temp table dump_controversy_stories as
+    select cs.* from controversy_stories cs, stories_tags_map stm
+        where cs.stories_id = stm.stories_id and
+            stm.tags_id = ?
+END
+
+    $db->query( <<'END', $tag->{ tags_id } );
+create temp table dump_controversy_links_cross_media as
+    select cs.* from controversy_links_cross_media cs, stories_tags_map sstm, stories_tags_map rstm
+        where cs.stories_id = sstm.stories_id and
+            sstm.tags_id = $1 and
+            cs.ref_stories_id = rstm.stories_id and
+            rstm.tags_id = $1
+END
+
+}
+
 sub main
 {
-    my ( $start_date, $end_date, $period, $weighting, $controversies_id, $cleanup_data );
+    my ( $start_date, $end_date, $period, $weighting, $controversies_id, $cleanup_data, $tag );
 
     $period    = 'all';
     $weighting = 'link';
@@ -1074,13 +1118,14 @@ sub main
         "end_date=s"    => \$end_date,
         "period=s"      => \$period,
         "controversy=s" => \$controversies_id,
-        "cleanup_data!" => \$cleanup_data
+        "cleanup_data!" => \$cleanup_data,
+        "tag=s"         => \$tag
     ) || return;
 
     $weighting = 'link';
 
     die(
-"Usage: $0 --controversy < id > [ --start_date < start date > --end_date < end date > --period < overall|weekly|monthly|all|custom > --cleanup_data ]"
+"Usage: $0 --controversy < id > [ --start_date < start date > --end_date < end date > --period < overall|weekly|monthly|all|custom > --cleanup_data --tag ]"
     ) unless ( $controversies_id );
 
     my $all_periods    = [ qw(custom overall weekly monthly) ];
@@ -1093,6 +1138,7 @@ sub main
       if ( !grep { $_ eq $weighting } ( 'all', @{ $all_weightings } ) );
 
     my $db = MediaWords::DB::connect_to_db;
+    $db->dbh->{ PrintWarn } = 0;
 
     my $controversy = $db->find_by_id( 'controversies', $controversies_id )
       || die( "Unable to find controversy '$controversies_id'" );
@@ -1100,6 +1146,9 @@ sub main
     my ( $default_start_date, $default_end_date ) = get_default_dates( $db, $controversy );
     $start_date ||= $default_start_date;
     $end_date   ||= $default_end_date;
+
+    $_dump_tag = $tag;
+    setup_dump_tables( $db, $tag );
 
     my $periods = ( $period eq 'all' ) ? $all_periods : [ $period ];
 
