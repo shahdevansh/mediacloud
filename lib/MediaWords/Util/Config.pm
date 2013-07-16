@@ -74,6 +74,8 @@ sub set_defaults
     $config->{ mediawords }->{ always_show_stack_traces }         ||= "no";
     $config->{ mediawords }->{ disable_json_top_500_words_cache } ||= "no";
     $config->{ mediawords }->{ download_storage_locations }       ||= [ 'tar' ];
+    $config->{ mediawords }->{ read_tar_downloads_from_gridfs }   ||= 'no';
+    $config->{ mediawords }->{ read_file_downloads_from_gridfs }  ||= 'no';
     $config->{ session }->{ storage }                             ||= "$ENV{HOME}/tmp/mediacloud-session";
 
     return $config;
