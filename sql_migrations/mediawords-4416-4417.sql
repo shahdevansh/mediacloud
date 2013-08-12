@@ -15,6 +15,29 @@
 -- 1 of 2. Import the output of 'apgdiff':
 --
 
+create index controversy_links_controversy on controversy_links ( controversies_id );
+
+
+-- The following ALTERs actually belong to the r4418-r4419 SQL diff, but
+-- they're being pushed as a hot patch to the current release branch.
+ALTER INDEX auth_users_roles_map_users_id_roles_id
+	RENAME TO auth_users_roles_map_auth_users_id_auth_roles_id;
+
+ALTER TABLE auth_users
+	RENAME users_id TO auth_users_id;
+
+ALTER TABLE auth_roles
+	RENAME roles_id TO auth_roles_id;
+
+ALTER TABLE auth_users_roles_map
+	RENAME auth_users_roles_map TO auth_users_roles_map_id;
+ALTER TABLE auth_users_roles_map
+	RENAME users_id TO auth_users_id;
+ALTER TABLE auth_users_roles_map
+	RENAME roles_id TO auth_roles_id;
+
+
+
 CREATE OR REPLACE FUNCTION set_database_schema_version() RETURNS boolean AS $$
 DECLARE
     
@@ -33,8 +56,6 @@ BEGIN
 END;
 $$
 LANGUAGE 'plpgsql';
-
-create index controversy_links_controversy on controversy_links ( controversies_id );
 
 
 --
