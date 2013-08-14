@@ -26,9 +26,10 @@ fi
 # (https://rt.cpan.org/Public/Bug/Display.html?id=85861)
 $CPANM --notest ExtUtils::MakeMaker
 
-# enforce the 0.9.15 version because that's the latest one which
-# currently works on Chloe
-$CPANM Carton@0.9.15
-
+<<<<<<< HEAD
+$CPANM Carton~0.9.15
+=======
+$CPANM ./foreign_modules/carton-v0.9.15.tar.gz
+>>>>>>> parent of b6c6c53... don't store Carton's tarball in the repository, pass the required version as a parameter to cpanm instead
 $CPANM List::MoreUtils
 $CPANM Devel::NYTProf
