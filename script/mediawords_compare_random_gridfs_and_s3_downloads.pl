@@ -123,6 +123,12 @@ EOF
         push( @{ $download_ids }, $random_download_id );
     }
 
+    # Sanity check
+    if ( scalar( @{ $download_ids } ) != $num_random_downloads )
+    {
+        die "Unable to fetch $num_random_downloads (fetched only " . scalar( @{ $download_ids } ) . ")";
+    }
+
     return $download_ids;
 }
 
@@ -259,6 +265,7 @@ sub main
         die "One or more downloads in GridFS and S3 are not equal.\n";
     }
 
+    say STDERR "All $number_of_downloads_to_compare downloads are equal.";
     say STDERR "finished --  " . localtime();
 }
 
