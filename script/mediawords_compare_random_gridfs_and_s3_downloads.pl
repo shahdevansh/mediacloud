@@ -135,19 +135,19 @@ sub _fetch_download($$)
 
     my $download = { downloads_id => $downloads_id };
 
-    my $content = undef;
-    eval { $content = $download_store->fetch_content( $download ); };
+    my $content_ref = undef;
+    eval { $content_ref = $download_store->fetch_content( $download ); };
     if ( $@ )
     {
         say STDERR "\tUnable to fetch download $downloads_id from " . ref( $download_store ) . ": $@";
-        $content = undef;
+        $content_ref = undef;
     }
     else
     {
-        if ( defined $content )
+        if ( defined $content_ref )
         {
             say STDERR "\tDownload's $downloads_id length as fetched from " . ref( $download_store ) . ": " .
-              length( $content );
+              length( $$content_ref );
         }
         else
         {
@@ -155,7 +155,14 @@ sub _fetch_download($$)
         }
     }
 
-    return $content;
+    if ( defined $content_ref )
+    {
+        return $$content_ref;
+    }
+    else
+    {
+        return undef;
+    }
 }
 
 # Compares a number of GridFS downloads to their counterparts in S3
