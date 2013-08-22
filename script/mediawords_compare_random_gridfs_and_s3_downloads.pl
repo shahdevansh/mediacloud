@@ -31,6 +31,7 @@ use MediaWords::CommonLibs;
 use MediaWords::DBI::Downloads::Store::GridFS;
 use MediaWords::DBI::Downloads::Store::AmazonS3;
 use Getopt::Long;
+use Data::Dumper;
 
 # Default number of randomly chosen downloads to compare
 use constant DEFAULT_NUMBER_OF_DOWNLOADS_TO_COMPARE => 1000;
@@ -110,13 +111,16 @@ EOF
             LIMIT 1
 EOF
             $random_downloads_id_offset
-        )->flat;
-        unless ( $random_download_id )
+        )->hash;
+        unless ( $random_download_id and $random_download_id->{ downloads_id } )
         {
             say STDERR "Unable to fetch random download with offset $random_downloads_id_offset.";
             return [];
         }
-        push( $download_ids, $random_download_id );
+        $random_download_id = $random_download_id->{ downloads_id };
+
+        # say STDERR "Randomly chose download ID " . Dumper($random_download_id);
+        push( @{ $download_ids }, $random_download_id );
     }
 
     return $download_ids;
@@ -142,8 +146,7 @@ sub _fetch_download($$)
     {
         if ( defined $content )
         {
-            say STDERR "\tDownload's $downloads_id length as fetched from " .
-              ref( $download_store ) . ": " .
+            say STDERR "\tDownload's $downloads_id length as fetched from " . ref( $download_store ) . ": " .
               length( $content );
         }
         else
@@ -188,6 +191,7 @@ sub compare_random_gridfs_and_s3_downloads($)
         {
             if ( $gridfs_content eq $s3_content )
             {
+
                 # Both were successfully fetched and are equal
                 $downloads_are_equal = 1;
             }
@@ -196,6 +200,7 @@ sub compare_random_gridfs_and_s3_downloads($)
         {
             if ( ( !defined( $gridfs_content ) ) and ( !defined( $s3_content ) ) )
             {
+
                 # Both are undef (considered equal)
                 $downloads_are_equal = 1;
             }
