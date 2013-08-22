@@ -56,7 +56,7 @@ sub _get_random_download_ids($$)
         WHERE oid = 'public.downloads'::regclass
 EOF
     )->flat;
-    unless ( $downloads_avg_row_count < $num_random_downloads )
+    if ( $downloads_avg_row_count < $num_random_downloads )
     {
         say STDERR "Downloads table is empty or has less rows than $num_random_downloads.";
         return [];
