@@ -167,8 +167,6 @@ sub compare_random_gridfs_and_s3_downloads($)
     my $gridfs_store = MediaWords::DBI::Downloads::Store::GridFS->new()   or die "Unable to connect to GridFS.";
     my $s3_store     = MediaWords::DBI::Downloads::Store::AmazonS3->new() or die "Unable to connect to Amazon S3.";
 
-    say STDERR ref( $gridfs_store );
-
     say STDERR "Fetching $number_of_downloads_to_compare random download IDs...";
     my $random_download_ids = _get_random_download_ids( $db, $number_of_downloads_to_compare );
     unless ( scalar @{ $random_download_ids } )
