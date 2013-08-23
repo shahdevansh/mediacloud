@@ -102,8 +102,7 @@ EOF
             <<EOF,
             SELECT downloads_id
             FROM downloads
-            WHERE type = 'content'
-              AND state = 'success'
+            WHERE state = 'success'
               AND file_status != 'missing'
               AND path NOT LIKE 'content:%'
               AND downloads_id >= ?
@@ -152,7 +151,8 @@ sub _fetch_download($$)
     {
         if ( defined $content_ref )
         {
-            say STDERR "\tDownload's $downloads_id length as fetched from " . ref( $download_store ) . ": " .
+            say STDERR "\tDownload's $downloads_id length as fetched from " .
+              ref( $download_store ) . ": " .
               length( $$content_ref );
         }
         else
