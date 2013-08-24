@@ -281,13 +281,17 @@ sub main
     {
         die "The compare script died while comparing downloads: $@\n";
     }
-    unless ( $result )
+
+    say STDERR "finished --  " . localtime();
+
+    if ( $result )
+    {
+        say STDERR "All $number_of_downloads_to_compare downloads are equal.";
+    }
+    else
     {
         die "One or more downloads in GridFS and S3 are not equal.\n";
     }
-
-    say STDERR "All $number_of_downloads_to_compare downloads are equal.";
-    say STDERR "finished --  " . localtime();
 }
 
 main();
