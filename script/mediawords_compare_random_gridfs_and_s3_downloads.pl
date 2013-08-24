@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
 #
 # Compare a variable number of random downloads from MongoDB GridFS to their
-# (backed up) counterparts in Amazon S3
+# (backed up) counterparts in Amazon S3.
+#
+# Treat Tar (path LIKE 'tar:%'), filesystem and GridFS (path LIKE 'gridfs:%')
+# as being located in GridFS.
 #
 # Exits with 0 when the downloads are equal, non-zero value when they're not
 #
@@ -40,32 +43,66 @@ use constant DEFAULT_NUMBER_OF_DOWNLOADS_TO_COMPARE => 1000;
 # (useful if you're backing up downloads to S3 at midnight)
 use constant CHOOSE_FROM_DOWNLOADS_ORDER_THAN_DAY_BEFORE_YESTERDAY => 1;
 
-# Get a number of random download IDs from the database
-# * due to the nature of implementation, download IDs might not be always unique
-# * skips "content:" downloads
-# Params: number of random download IDs to fetch
-# Returns: arrayref of integer download IDs or empty arrayref
-sub _get_random_download_ids($$)
+# Returns true if the downloads table contains at least one download that
+# is stored to GridFS and is expected to be backed up to S3 (and thus the
+# script can proceed).
+# Used to prevent the fancy get_random_gridfs_downloads_id() PostgreSQL
+# function (defined in script/mediawords.sql) from getting into an infinite
+# loop.
+# Params: database object
+# Returns: true if there exists at least one download that is expected to
+# be stored in GridFS and backed up to S3
+sub _downloads_table_contains_gridfs_downloads($)
 {
-    my ( $db, $num_random_downloads ) = @_;
+    my ( $db ) = @_;
 
-    # Ensure that there are downloads to choose from
+    my $at_least_one_gridfs_download = $db->query(
+        <<EOF
+            SELECT 1
+            FROM downloads
+            WHERE state = 'success'
+              AND file_status != 'missing'
+              AND path NOT LIKE 'content:%'
+        LIMIT 1
+EOF
+    )->flat;
+    if ( $at_least_one_gridfs_download )
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+# Average table row count
+# Params: database object, table name
+# Returns: average table row count
+sub _avg_table_row_count($$)
+{
+    my ( $db, $table_name ) = @_;
+
     my $downloads_avg_row_count = $db->query(
         <<EOF
         SELECT reltuples AS avg_row_count
         FROM pg_class
-        WHERE oid = 'public.downloads'::regclass
+        WHERE oid = 'public.$table_name'::regclass
 EOF
     )->flat;
-    if ( $downloads_avg_row_count < $num_random_downloads )
-    {
-        say STDERR "Downloads table is empty or has less rows than $num_random_downloads.";
-        return [];
-    }
+    return $downloads_avg_row_count;
+}
 
-    # Select the biggest download ID that might be available in S3
+# Max. download's ID that is expected to be backed up to S3
+# Params: database object,
+# Returns: max. download's ID
+# Dies on error
+sub _max_downloads_id($$)
+{
+    my ( $db, $choose_from_downloads_order_than_day_before_yesterday ) = @_;
+
     my $sql = '';
-    if ( CHOOSE_FROM_DOWNLOADS_ORDER_THAN_DAY_BEFORE_YESTERDAY )
+    if ( $choose_from_downloads_order_than_day_before_yesterday )
     {
         $sql = <<EOF;
             SELECT downloads_id AS max_downloads_id
@@ -83,52 +120,12 @@ EOF
 EOF
     }
     my ( $max_downloads_id ) = $db->query( $sql )->flat;
-    unless ( $max_downloads_id )
+    unless ( defined $max_downloads_id )
     {
-        say STDERR "Unable to fetch the max. downloads ID.";
-        return [];
+        die "Unable to fetch max. downloads ID.";
     }
 
-    say STDERR "Will fetch $num_random_downloads random downloads up until download $max_downloads_id.";
-
-    # Fetch a requested number of random downloads
-    my $download_ids = [];
-    for ( my $x = 0 ; $x < $num_random_downloads ; ++$x )
-    {
-
-        my $random_downloads_id_offset = int( $max_downloads_id * rand() );
-
-        my $random_download_id = $db->query(
-            <<EOF,
-            SELECT downloads_id
-            FROM downloads
-            WHERE state = 'success'
-              AND file_status != 'missing'
-              AND path NOT LIKE 'content:%'
-              AND downloads_id >= ?
-            ORDER BY downloads_id
-            LIMIT 1
-EOF
-            $random_downloads_id_offset
-        )->hash;
-        unless ( $random_download_id and $random_download_id->{ downloads_id } )
-        {
-            say STDERR "Unable to fetch random download with offset $random_downloads_id_offset.";
-            return [];
-        }
-        $random_download_id = $random_download_id->{ downloads_id };
-
-        # say STDERR "Randomly chose download ID " . Dumper($random_download_id);
-        push( @{ $download_ids }, $random_download_id );
-    }
-
-    # Sanity check
-    if ( scalar( @{ $download_ids } ) != $num_random_downloads )
-    {
-        die "Unable to fetch $num_random_downloads (fetched only " . scalar( @{ $download_ids } ) . ")";
-    }
-
-    return $download_ids;
+    return $max_downloads_id;
 }
 
 # Fetch download from the designated store, print verbose messages along the way
@@ -183,17 +180,39 @@ sub compare_random_gridfs_and_s3_downloads($)
     my $gridfs_store = MediaWords::DBI::Downloads::Store::GridFS->new()   or die "Unable to connect to GridFS.";
     my $s3_store     = MediaWords::DBI::Downloads::Store::AmazonS3->new() or die "Unable to connect to Amazon S3.";
 
-    say STDERR "Fetching $number_of_downloads_to_compare random download IDs...";
-    my $random_download_ids = _get_random_download_ids( $db, $number_of_downloads_to_compare );
-    unless ( scalar @{ $random_download_ids } )
+    # Ensure that there are downloads to choose from
+    unless ( _downloads_table_contains_gridfs_downloads( $db ) )
     {
-        die "Unable to fetch $number_of_downloads_to_compare random download IDs.";
+        die "There are no GridFS downloads in the downloads table.";
     }
+    if ( _avg_table_row_count( $db, 'downloads' ) < $number_of_downloads_to_compare )
+    {
+        die "Downloads table is empty or has less rows than $number_of_downloads_to_compare.";
+    }
+
+    # Select the biggest download ID that might be available in S3
+    my $max_downloads_id = _max_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_ORDER_THAN_DAY_BEFORE_YESTERDAY );
+
+    say STDERR "Will fetch $number_of_downloads_to_compare random downloads up until download $max_downloads_id.";
 
     my $all_downloads_are_equal = 1;
 
-    foreach my $downloads_id ( @{ $random_download_ids } )
+    # Fetch a requested number of random downloads
+    for ( my $x = 0 ; $x < $number_of_downloads_to_compare ; ++$x )
     {
+        my $downloads_id = $db->query(
+            <<EOF,
+            SELECT get_random_gridfs_downloads_id(?) AS random_downloads_id
+EOF
+            $max_downloads_id
+        )->hash;
+        unless ( $downloads_id and $downloads_id->{ random_downloads_id } )
+        {
+            die "Unable to fetch random download ID.";
+        }
+        $downloads_id = $downloads_id->{ random_downloads_id };
+
+        # Compare
         say STDERR "Testing download ID $downloads_id...";
 
         my $gridfs_content = _fetch_download( $gridfs_store, $downloads_id );
@@ -230,6 +249,7 @@ sub compare_random_gridfs_and_s3_downloads($)
 
             $all_downloads_are_equal = 0;
         }
+
     }
 
     return $all_downloads_are_equal;
