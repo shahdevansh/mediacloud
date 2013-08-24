@@ -65,7 +65,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4421;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4422;
     
 BEGIN
 
@@ -1913,6 +1913,7 @@ CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEG
               AND state = 'success'
               AND file_status != 'missing'
               AND path NOT LIKE 'content:%'
+              AND path != ''  -- some paths are empty
             LIMIT 1;
 
             IF NOT FOUND THEN

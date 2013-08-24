@@ -63,6 +63,7 @@ sub _downloads_table_contains_gridfs_downloads($)
             WHERE state = 'success'
               AND file_status != 'missing'
               AND path NOT LIKE 'content:%'
+              AND path != ''  -- some paths are empty
         LIMIT 1
 EOF
     )->flat;
