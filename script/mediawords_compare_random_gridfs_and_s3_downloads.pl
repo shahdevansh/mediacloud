@@ -231,12 +231,8 @@ EOF
         }
         else
         {
-            if ( ( !defined( $gridfs_content ) ) and ( !defined( $s3_content ) ) )
-            {
-
-                # Both are undef (considered equal)
-                $downloads_are_equal = 1;
-            }
+            # It is expected that the download will always exist in GridFS and thus in S3
+            $downloads_are_equal = 0;
         }
 
         unless ( $downloads_are_equal )
