@@ -34,7 +34,7 @@ $(document).ready(function () {
 
 <div id="wholecolumn">
 
-    <div class="boxtitle">
+    <div id="boxtitle">
         Search Stories
     </div>
     <fieldset>

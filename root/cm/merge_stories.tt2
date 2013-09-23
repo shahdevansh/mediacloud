@@ -14,7 +14,7 @@
         
     </div>
 
-    <div class="boxtitle">
+    <div id="boxtitle">
         Merge into Destination Story
     </div>
     <fieldset>

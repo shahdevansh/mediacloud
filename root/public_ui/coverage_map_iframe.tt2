@@ -5,7 +5,7 @@
 </head>
 
 <body style="background-color: white" >
-<script type="text/javascript">
+<script language="javascript" type="text/javascript">
 
    $(document).ready(function() 
     {

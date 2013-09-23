@@ -2,7 +2,7 @@
 #
 # Update Perl module dependencies to their latest versions.
 #
-# This script removes cpanfile.snapshot, Carton's cache and modules themselves so Carton is then
+# This script removes carton.lock, Carton's cache and modules themselves so Carton is then
 # forced to check for new versions of modules.
 #
 
@@ -18,8 +18,7 @@ cpanm Carton
 # Remove modules and Carton's cache, then reinstall the modules
 rm -rf .carton/
 rm -rf local/
-rm cpanfile.snapshot
+rm carton.lock
 
 source ./script/set_java_home.sh
-JAVA_HOME=$JAVA_HOME ./script/run_carton.sh install  # running with "--deployment" would not regenerate cpanfile.snapshot
-
+JAVA_HOME=$JAVA_HOME ./script/run_carton.sh install  # running with "--deployment" would not regenerate carton.lock

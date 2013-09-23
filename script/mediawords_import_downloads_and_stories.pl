@@ -102,8 +102,6 @@ sub import_downloads
 
     my $feed_downloads_processed = 0;
 
-    my $new_story_count = 0;
-
     foreach my $child_node ( @root_child_nodes )
     {
         $feed_downloads_processed++;
@@ -137,7 +135,7 @@ sub import_downloads
 
         $feed_exists = ( $db->query( "SELECT 1 from feeds where feeds_id = ? ", $download->{ feeds_id } )->flat() )[ 0 ];
 
-        die "Non-existence feed $download->{feeds_id}" if !( $feed_exists );
+        next if !( $feed_exists );
 
         my @child_stories_list = $child_node->getElementsByTagName( "child_stories" );
 
@@ -213,8 +211,6 @@ sub import_downloads
               MediaWords::Crawler::FeedHandler::_add_story_using_parent_download( $db, $story_hash, $db_download );
             my @story_downloads_list = $story_element->getElementsByTagName( "story_downloads" );
 
-            $new_story_count++;
-
             die unless ( scalar( @story_downloads_list ) == 1 );
 
             my $story_downloads_list_element = $story_downloads_list[ 0 ];
@@ -247,23 +243,17 @@ sub import_downloads
                     $download_hash->{ host } = '';
                 }
 
-                die unless $download_hash->{ type } eq 'content';
-
                 my $db_story_download = $db->create( 'downloads', $download_hash );
 
-                if ( $db_story_download->{ state } eq 'success' )
+                if ( $db_story_download->{ state } eq 'sucess' )
                 {
-                    $db_story_download =
-                      MediaWords::DBI::Downloads::store_content( $db, $db_story_download, \$story_download_decoded_content );
-                    die unless $db_story_download->{ state } eq 'success';
+                    MediaWords::DBI::Downloads::store_content( $db, $db_story_download, \$story_download_decoded_content );
                 }
 
                 $parent = $db_story_download;
             }
         }
     }
-
-    say "$new_story_count new stories for $xml_file_name";
 }
 
 # fork of $num_processes

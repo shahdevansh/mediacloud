@@ -1,3 +1,2 @@
-git reset cpanfile.snapshot
-git checkout cpanfile.snapshot
+svn revert carton.lock 
 rm -rf .carton local
