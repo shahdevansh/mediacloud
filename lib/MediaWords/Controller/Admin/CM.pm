@@ -12,6 +12,8 @@ use List::Compare;
 use MediaWords::CM::Dump;
 use MediaWords::CM::Mine;
 use MediaWords::Solr;
+use MediaWords::GearmanFunction;
+use MediaWords::GearmanFunction::CM::DumpControversy;
 
 use base 'Catalyst::Controller::HTML::FormFu';
 
@@ -168,6 +170,36 @@ END
     $c->stash->{ controversy }                  = $controversy;
     $c->stash->{ controversy_dump_time_slices } = $controversy_dump_time_slices;
     $c->stash->{ template }                     = 'cm/view_dump.tt2';
+}
+
+# enqueue a new controversy dump on Gearman
+sub create_dump : Local
+{
+    my ( $self, $c, $controversies_id ) = @_;
+
+    my $db = $c->dbis;
+
+    my $controversy = $db->query(
+        <<END,
+        SELECT *
+        FROM controversies_with_search_info
+        WHERE controversies_id = ?
+END
+        $controversies_id
+    )->hash;
+
+    unless ( MediaWords::GearmanFunction::gearman_is_enabled() )
+    {
+        die "Gearman is disabled, controversy dump was not enqueued.";
+    }
+
+    # Enqueue dumping a controversy on Gearman
+    my $args = { controversies_id => $controversy->{ controversies_id } };
+    my $gearman_job_id = MediaWords::GearmanFunction::CM::DumpControversy->enqueue_on_gearman( $args );
+
+    my $msg =
+      "Creation of a new dump for controversy '$controversy->{ name }' was enqueued (Gearman job ID: $gearman_job_id)";
+    $c->res->redirect( $c->uri_for( "/admin/cm/view/$controversy->{ controversies_id }", { status_msg => $msg } ) );
 }
 
 # get the media marked as the most influential media for the current time slice

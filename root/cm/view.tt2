@@ -31,8 +31,10 @@
     </fieldset> 
 [% END %]
 
-
-<div class="boxtitle">Dumps</div>
+<div class="boxtitle">
+    Dumps
+    <a id="boxcommand" href="[% c.uri_for( '/admin/cm/create_dump/' _ controversy.controversies_id )%]">create new dump</a>
+</div>
 <table>
 
 <tr>
