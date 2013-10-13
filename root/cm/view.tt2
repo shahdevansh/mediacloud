@@ -73,6 +73,9 @@
                    activities=latest_activities
                    controversy=controversy %]
 
+        [% INCLUDE cm/include/todo_list.tt2
+                   controversy=controversy %]
+
     </div>
 
 </div>

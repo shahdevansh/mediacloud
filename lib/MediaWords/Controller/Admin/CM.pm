@@ -14,6 +14,7 @@ use MediaWords::Solr;
 use MediaWords::CM::Dump;
 use MediaWords::CM::Mine;
 use MediaWords::DBI::Activities;
+use MediaWords::CM::Mine::Spider;
 
 use constant ROWS_PER_PAGE => 25;
 
@@ -153,11 +154,34 @@ END
         $latest_activities->[ $x ] = $activity;
     }
 
+    # Last time 'cm_mine_controversy' was run
+    my $run_spider_last_run_date = $db->query(
+        <<EOF
+        SELECT creation_date
+        FROM activities
+        WHERE name = 'cm_mine_controversy'
+        ORDER BY creation_date DESC
+        LIMIT 1
+EOF
+    )->hash;
+    my $run_spider_reasons = MediaWords::CM::Mine::Spider::spider_needs_to_be_run( $db, $controversy->{ controversies_id } );
+
+    # Controversy to-dos
+    my $todo_list = {};
+    if ( $run_spider_reasons )
+    {
+        $todo_list->{ run_spider } = {
+            reasons       => $run_spider_reasons,
+            last_run_date => $run_spider_last_run_date->{ creation_date }
+        };
+    }
+
     $c->stash->{ controversy }       = $controversy;
     $c->stash->{ query }             = $query;
     $c->stash->{ controversy_dumps } = $controversy_dumps;
     $c->stash->{ latest_full_dump }  = $latest_full_dump;
     $c->stash->{ latest_activities } = $latest_activities;
+    $c->stash->{ todo_list }         = $todo_list;
     $c->stash->{ template }          = 'cm/view.tt2';
 }
 

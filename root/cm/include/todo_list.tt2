@@ -1,0 +1,56 @@
+<div class="boxtitle">Todo List</div>
+<table class="cm_todo_list">
+
+    <tr>
+        <th>Action</th>
+        <th>Details</th>
+    </tr>
+
+    [% IF todo_list.run_spider %]
+        <tr [% IF even %]class="even"[% END %]>
+            <td><a href="#" title="Enqueue &quot;MediaWords::GearmanFunction::CM::MineControversy&quot; job">Run Spider</a></td>
+            <td>
+                <p>reasons:</p>
+                <ul>
+                    [% FOREACH reason IN todo_list.run_spider.reasons -%]
+                        <li>[% reason | html %]</li>
+                    [% END %]
+                </ul>
+                <p>
+                    last run:
+                    [% IF todo_list.run_spider.last_run_date %]
+                        [% datetime.format( todo_list.run_spider.last_run_date ) %]
+                    [% ELSE %]
+                        never
+                    [% END %]
+                </p>
+            </td>
+        </tr>
+        [% SET even = !even %]
+    [% END %]
+
+    <!--
+    <tr [% IF even %]class="even"[% END %]>
+        <td><a href="#">Dedup Media</a></td>
+        <td>media to dedup: 305; reason: new media</td>
+    </tr>
+    [% SET even = !even %]
+    -->
+
+    <!--
+    <tr [% IF even %]class="even"[% END %]>
+        <td><a href="#">Check Stories</a></td>
+        <td>stories to check: 0</td>
+    </tr>
+    [% SET even = !even %]
+    -->
+
+    <!--
+    <tr [% IF even %]class="even"[% END %]>
+        <td><a href="#">Update Search Tags</a></td>
+        <td>tags to search: 0</td>
+    </tr>
+    [% SET even = !even %]
+    -->
+
+</div>
