@@ -6,28 +6,33 @@
         <th>Details</th>
     </tr>
 
-    [% IF todo_list.run_spider %]
-        <tr [% IF even %]class="even"[% END %]>
-            <td><a href="#" title="Enqueue &quot;MediaWords::GearmanFunction::CM::MineControversy&quot; job">Run Spider</a></td>
-            <td>
-                <p>reasons:</p>
-                <ul>
-                    [% FOREACH reason IN todo_list.run_spider.reasons -%]
-                        <li>[% reason | html %]</li>
-                    [% END %]
-                </ul>
-                <p>
-                    last run:
-                    [% IF todo_list.run_spider.last_run_date %]
-                        [% datetime.format( todo_list.run_spider.last_run_date ) %]
-                    [% ELSE %]
-                        never
-                    [% END %]
-                </p>
-            </td>
-        </tr>
-        [% SET even = !even %]
-    [% END %]
+    <tr [% IF even %]class="even"[% END %]>
+        <td>
+            [% IF todo_list.run_spider %]
+                <a href="#" title="Enqueue &quot;MediaWords::GearmanFunction::CM::MineControversy&quot; job">Run Spider</a>
+            [% ELSE %]
+                Run Spider
+            [% END %]
+        </td>
+
+        <td>
+            <p>reasons:</p>
+            <ul>
+                [% FOREACH reason IN todo_list.run_spider.reasons -%]
+                    <li>[% reason | html %]</li>
+                [% END %]
+            </ul>
+            <p>
+                last run:
+                [% IF todo_list.run_spider.last_run_date %]
+                    [% datetime.format( todo_list.run_spider.last_run_date ) %]
+                [% ELSE %]
+                    never
+                [% END %]
+            </p>
+        </td>
+    </tr>
+    [% SET even = !even %]
 
     <!--
     <tr [% IF even %]class="even"[% END %]>
