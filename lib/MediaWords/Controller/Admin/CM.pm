@@ -154,15 +154,17 @@ END
         $latest_activities->[ $x ] = $activity;
     }
 
-    # Last time 'cm_mine_controversy' was run
+    # Last time 'cm_mine_controversy' was run for this controversy
     my $run_spider_last_run_date = $db->query(
-        <<EOF
+        <<EOF,
         SELECT creation_date
         FROM activities
         WHERE name = 'cm_mine_controversy'
+          AND object_id = ?
         ORDER BY creation_date DESC
         LIMIT 1
 EOF
+        $controversy->{ controversies_id }
     )->hash;
     my $run_spider_reasons = MediaWords::CM::Mine::Spider::spider_needs_to_be_run( $db, $controversy->{ controversies_id } );
 
