@@ -156,13 +156,45 @@ END
         $latest_activities->[ $x ] = $activity;
     }
 
-    $c->stash->{ controversy }       = $controversy;
-    $c->stash->{ query }             = $query;
-    $c->stash->{ controversy_dumps } = $controversy_dumps;
-    $c->stash->{ latest_full_dump }  = $latest_full_dump;
-    $c->stash->{ latest_activities } = $latest_activities;
+    # Dumps that are being generated
+    my $pending_dumps = $db->query(
+        <<EOF,
+        SELECT *
+        FROM gearman_job_queue
+        WHERE function_name = ?
+        ORDER BY gearman_job_queue_id DESC
+        LIMIT 10
+EOF
+        MediaWords::GearmanFunction::CM::DumpControversy->name()
+    )->hashes;
+
+    # Append log paths to attempted activities
+    for ( my $x = 0 ; $x < scalar @{ $pending_dumps } ; ++$x )
+    {
+        my $dump = $pending_dumps->[ $x ];
+
+        if ( $dump->{ status } ne 'enqueued' )
+        {
+            $dump->{ log_path } =
+              Gearman::JobScheduler::log_path_for_gearman_job( MediaWords::GearmanFunction::CM::DumpControversy->name(),
+                $dump->{ job_handle } );
+        }
+        else
+        {
+            $dump->{ log_path } = undef;
+        }
+
+        $pending_dumps->[ $x ] = $dump;
+    }
+
+    $c->stash->{ controversy }        = $controversy;
+    $c->stash->{ query }              = $query;
+    $c->stash->{ controversy_dumps }  = $controversy_dumps;
+    $c->stash->{ latest_full_dump }   = $latest_full_dump;
+    $c->stash->{ latest_activities }  = $latest_activities;
+    $c->stash->{ pending_dumps }      = $pending_dumps;
     $c->stash->{ gearman_is_enabled } = MediaWords::GearmanFunction::gearman_is_enabled();
-    $c->stash->{ template }          = 'cm/view.tt2';
+    $c->stash->{ template }           = 'cm/view.tt2';
 }
 
 # add num_stories, num_story_links, num_media, and num_media_links

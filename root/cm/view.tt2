@@ -33,6 +33,43 @@
             </fieldset> 
         [% END %]
 
+        [% IF pending_dumps.size > 0 %]
+            <!-- Dumps that are being generated -->        
+            <div class="boxtitle">Latest [% pending_dumps.size %] pending dumps</div>
+            <table>
+
+                <tr>
+                    <th style="width: 15%">Gearman Job ID</th>
+                    <th style="width: 15%">State</th>
+                    <th style="width: 45%">Log</th>
+                    <th style="width: 45%">Error Message</th>
+                </tr>
+
+                [% FOREACH dump IN pending_dumps -%]
+                <tr>
+                    <td>[% dump.job_handle | html %]</td>
+                    <td>[% dump.status | html %]</td>
+                    <td style="font-family: monospace" class="force-word-wrap">
+                        [% IF dump.status != 'enqueued' %]
+                            [% IF dump.log_path %]
+                                <a href="[% c.uri_for( '/admin/gearman/view_log' ) _ '?job_id=' _ dump.job_handle %]">
+                                    [% dump.log_path | html %]
+                                </a>
+                            [% ELSE %]
+                                log path was not found
+                            [% END %]
+                        [% ELSE %]
+                            not yet started
+                        [% END %]
+                    </td>
+                    <td style="font-family: monospace" class="force-word-wrap">[% dump.error_message | html %]</td>
+                </tr>
+                [% END %]
+
+            </table>
+        [% END %]
+
+        <!-- Generated dumps -->
         <div class="boxtitle">
             Dumps
             [% IF gearman_is_enabled %]
