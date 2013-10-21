@@ -293,6 +293,12 @@ a#boxcommand {
   text-decoration:none;
 }
 
+a#boxcommand.boxcommand_disabled {
+  cursor: default !important;
+  color: gray !important;
+  pointer-events: none !important;
+}
+
 a#command {
   padding-top: 0px;
   padding-bottom: 0px;

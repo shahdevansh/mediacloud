@@ -161,6 +161,7 @@ END
     $c->stash->{ controversy_dumps } = $controversy_dumps;
     $c->stash->{ latest_full_dump }  = $latest_full_dump;
     $c->stash->{ latest_activities } = $latest_activities;
+    $c->stash->{ gearman_is_enabled } = MediaWords::GearmanFunction::gearman_is_enabled();
     $c->stash->{ template }          = 'cm/view.tt2';
 }
 

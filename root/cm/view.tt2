@@ -35,7 +35,11 @@
 
         <div class="boxtitle">
             Dumps
-            <a id="boxcommand" href="[% c.uri_for( '/admin/cm/create_dump/' _ controversy.controversies_id )%]">create new dump</a>
+            [% IF gearman_is_enabled %]
+                <a id="boxcommand" href="[% c.uri_for( '/admin/cm/create_dump/' _ controversy.controversies_id )%]">create new dump</a>
+            [% ELSE %]
+                <a id="boxcommand" class="boxcommand_disabled" href="#" title="Gearman is disabled">create new dump</a>
+            [% END %]
         </div>
         <table>
 
