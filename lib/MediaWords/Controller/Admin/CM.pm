@@ -157,15 +157,26 @@ END
     }
 
     # Dumps that are being generated
+    #
+    # "CM::DumpControversy" jobs only accept the "controversies_id" as a
+    # single argument in a hashref, so we can assume that if we regenerate the
+    # "unique job ID" with the same function name and controversy ID, we can
+    # use that "unique job ID" to find enqueued jobs for the specific
+    # controversy.
+    my $args = _args_for_cm_dump_controversy_job( $controversy );
+    my $unique_job_id =
+      Gearman::JobScheduler::unique_job_id( MediaWords::GearmanFunction::CM::DumpControversy->name(), $args );
     my $pending_dumps = $db->query(
         <<EOF,
         SELECT *
         FROM gearman_job_queue
         WHERE function_name = ?
+          AND unique_job_id = ?
         ORDER BY gearman_job_queue_id DESC
         LIMIT 10
 EOF
-        MediaWords::GearmanFunction::CM::DumpControversy->name()
+        MediaWords::GearmanFunction::CM::DumpControversy->name(),
+        $unique_job_id
     )->hashes;
 
     # Append log paths to attempted activities
@@ -234,6 +245,14 @@ END
     $c->stash->{ template }                     = 'cm/view_dump.tt2';
 }
 
+# Return hashref of arguments for the MediaWords::CM::DumpControversy Gearman job
+sub _args_for_cm_dump_controversy_job($)
+{
+    my $controversy = shift;
+    my $args = { controversies_id => $controversy->{ controversies_id } };
+    return $args;
+}
+
 # enqueue a new controversy dump on Gearman
 sub create_dump : Local
 {
@@ -256,7 +275,7 @@ END
     }
 
     # Enqueue dumping a controversy on Gearman
-    my $args = { controversies_id => $controversy->{ controversies_id } };
+    my $args           = _args_for_cm_dump_controversy_job( $controversy );
     my $gearman_job_id = MediaWords::GearmanFunction::CM::DumpControversy->enqueue_on_gearman( $args );
 
     my $msg =
