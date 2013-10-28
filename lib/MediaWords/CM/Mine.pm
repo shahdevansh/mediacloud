@@ -264,7 +264,12 @@ sub lookup_medium_by_url
 
     if ( !$_media_url_lookup->{ MediaWords::Util::URL::normalize_url( $url ) } )
     {
-        my $media = $db->query( "select * from media where foreign_rss_links = false" )->hashes;
+        my $max_media_id = 0;
+        if ( $_media_url_lookup )
+        {
+            $max_media_id = List::Util::max( map( { $_->{ media_id } } values ( %{ $_media_url_lookup } ) ) );
+        }
+        my $media = $db->query( "select * from media where foreign_rss_links = false and media_id > ?", $max_media_id )->hashes;
         for my $medium ( @{ $media } )
         {
             my $dup_medium = get_dup_medium( $db, $medium->{ media_id } );
