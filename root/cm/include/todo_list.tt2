@@ -6,30 +6,63 @@
         <th>Details</th>
     </tr>
 
+    <!-- CM spider (MediaWords::GearmanFunction::CM::MineControversy) -->
     <tr [% IF even %]class="even"[% END %]>
         <td>
-            [% IF todo_list.run_spider %]
-                <a href="#" title="Enqueue &quot;MediaWords::GearmanFunction::CM::MineControversy&quot; job">Run Spider</a>
-            [% ELSE %]
+            [% IF pending_spider_runs.size %]
+                <!-- Spider is currently running -->
                 Run Spider
+            [% ELSE %]
+                <!-- Spider is not currently running -->
+                [% IF todo_list.run_spider %]
+                    <!-- Spider needs to be run -->
+                    <a href="[% c.uri_for( '/admin/cm/run_spider/' _ cd.controversies_id )%]"
+                       title="Enqueue &quot;MediaWords::GearmanFunction::CM::MineControversy&quot; job">Run Spider</a>
+                [% ELSE %]
+                    <!-- Spider does not need to be run -->
+                    Run Spider
+                [% END %]
             [% END %]
         </td>
 
         <td>
-            <p>reasons:</p>
-            <ul>
-                [% FOREACH reason IN todo_list.run_spider.reasons -%]
-                    <li>[% reason | html %]</li>
-                [% END %]
-            </ul>
-            <p>
-                last run:
-                [% IF todo_list.run_spider.last_run_date %]
-                    [% datetime.format( todo_list.run_spider.last_run_date ) %]
-                [% ELSE %]
-                    never
-                [% END %]
-            </p>
+            [% IF pending_spider_runs.size %]
+                <!-- Spider is currently running -->
+                <ul>
+                    [% FOREACH spider_run IN pending_spider_runs %]
+                        <li>
+                            Spider is <code>[% spider_run.status | html %]</code>
+                            as Gearman job <code>[% spider_run.job_handle | html %]</code>
+                            [% IF spider_run.status != 'enqueued' %]
+                                ; 
+                                [% IF spider_run.log_path %]
+                                    <a href="[% c.uri_for( '/admin/gearman/view_log' ) _ '?job_id=' _ spider_run.job_handle %]">view log</a>
+                                [% ELSE %]
+                                    log path was not found
+                                [% END %]
+                            [% ELSE %]
+                                
+                            [% END %]
+                            .
+                        </li>
+                    [% END %]
+                </ul>
+            [% ELSE %]
+                <p>reasons:</p>
+                <ul>
+                    [% FOREACH reason IN todo_list.run_spider.reasons -%]
+                        <li>[% reason | html %]</li>
+                    [% END %]
+                </ul>
+                <p>
+                    last run:
+                    [% IF todo_list.run_spider.last_run_date %]
+                        [% datetime.format( todo_list.run_spider.last_run_date ) %]
+                    [% ELSE %]
+                        never
+                    [% END %]
+                </p>
+            [% END %]
         </td>
     </tr>
     [% SET even = !even %]

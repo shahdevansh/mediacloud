@@ -15,6 +15,8 @@ use MediaWords::CM::Dump;
 use MediaWords::CM::Mine;
 use MediaWords::DBI::Activities;
 use MediaWords::CM::Mine::Spider;
+use Gearman::JobScheduler;
+use MediaWords::GearmanFunction::CM::MineControversy;
 
 use constant ROWS_PER_PAGE => 25;
 
@@ -154,6 +156,43 @@ END
         $latest_activities->[ $x ] = $activity;
     }
 
+    # CM spider runs that are enqueued / being run / failed
+    my $args = _args_for_cm_mine_controversy_job( $controversy );
+    my $unique_job_id =
+      Gearman::JobScheduler::unique_job_id( MediaWords::GearmanFunction::CM::MineControversy->name(), $args );
+    my $pending_spider_runs = $db->query(
+        <<EOF,
+        SELECT *
+        FROM gearman_job_queue
+        WHERE function_name = ?
+          AND unique_job_id = ?
+          AND status IN ('enqueued', 'running')
+        ORDER BY gearman_job_queue_id DESC
+        LIMIT 10
+EOF
+        MediaWords::GearmanFunction::CM::MineControversy->name(),
+        $unique_job_id
+    )->hashes;
+
+    # Append log paths to attempted activities
+    for ( my $x = 0 ; $x < scalar @{ $pending_spider_runs } ; ++$x )
+    {
+        my $spider_run = $pending_spider_runs->[ $x ];
+
+        if ( $spider_run->{ status } ne 'enqueued' )
+        {
+            $spider_run->{ log_path } =
+              Gearman::JobScheduler::log_path_for_gearman_job( MediaWords::GearmanFunction::CM::MineControversy->name(),
+                $spider_run->{ job_handle } );
+        }
+        else
+        {
+            $spider_run->{ log_path } = undef;
+        }
+
+        $pending_spider_runs->[ $x ] = $spider_run;
+    }
+
     # Last time 'cm_mine_controversy' was run for this controversy
     my $run_spider_last_run_date = $db->query(
         <<EOF,
@@ -178,13 +217,14 @@ EOF
         };
     }
 
-    $c->stash->{ controversy }       = $controversy;
-    $c->stash->{ query }             = $query;
-    $c->stash->{ controversy_dumps } = $controversy_dumps;
-    $c->stash->{ latest_full_dump }  = $latest_full_dump;
-    $c->stash->{ latest_activities } = $latest_activities;
-    $c->stash->{ todo_list }         = $todo_list;
-    $c->stash->{ template }          = 'cm/view.tt2';
+    $c->stash->{ controversy }         = $controversy;
+    $c->stash->{ query }               = $query;
+    $c->stash->{ controversy_dumps }   = $controversy_dumps;
+    $c->stash->{ latest_full_dump }    = $latest_full_dump;
+    $c->stash->{ latest_activities }   = $latest_activities;
+    $c->stash->{ todo_list }           = $todo_list;
+    $c->stash->{ pending_spider_runs } = $pending_spider_runs;
+    $c->stash->{ template }            = 'cm/view.tt2';
 }
 
 # add num_stories, num_story_links, num_media, and num_media_links
@@ -1433,6 +1473,61 @@ sub unredirect_medium : Local
     $c->stash->{ stories }     = $stories;
     $c->stash->{ medium }      = $medium;
     $c->stash->{ template }    = 'cm/unredirect_medium.tt2';
+}
+
+# Return hashref of arguments for the MediaWords::CM::MineControversy Gearman job
+sub _args_for_cm_mine_controversy_job($)
+{
+    my $controversy = shift;
+    my $args        = {
+        controversies_id       => $controversy->{ controversies_id },
+        dedup_stories          => 0,
+        import_only            => 0,
+        cache_broken_downloads => 0
+    };
+    return $args;
+}
+
+# merge stories_id into to_stories_id
+sub run_spider : Local
+{
+    my ( $self, $c, $controversies_id ) = @_;
+
+    my $db = $c->dbis;
+
+    my $controversy = $db->query(
+        <<END,
+        SELECT *
+        FROM controversies_with_search_info
+        WHERE controversies_id = ?
+END
+        $controversies_id
+    )->hash;
+
+    unless ( $controversy )
+    {
+        my $error = "Unable to fetch controversy with ID $controversies_id.";
+        my $u = $c->uri_for( "/admin/cm/view/$controversies_id", { error_msg => $error } );
+        $c->response->redirect( $u );
+        return;
+    }
+
+    # Enqueue spider run
+    my $args           = _args_for_cm_mine_controversy_job( $controversy );
+    my $gearman_job_id = MediaWords::GearmanFunction::CM::MineControversy->enqueue_on_gearman( $args );
+    unless ( $gearman_job_id )
+    {
+        my $error = "Unable to run spider on controversy \"$controversy->{ name }\".";
+        my $u = $c->uri_for( "/admin/cm/view/$controversies_id", { error_msg => $error } );
+        $c->response->redirect( $u );
+        return;
+    }
+
+    say STDERR "Enqueued Gearman job with ID: $gearman_job_id";
+
+    my $status_msg = "Enqueued a spider run for controversy \"$controversy->{ name }\" (Gearman job ID: $gearman_job_id).";
+    my $u = $c->uri_for( "/admin/cm/view/$controversies_id", { status_msg => $status_msg } );
+    $c->response->redirect( $u );
 }
 
 # List all activities
