@@ -134,7 +134,7 @@ EOF
 
     if ( $result )
     {
-        return 'controversy has undefined "stories_id" references';
+        return 'controversy has stories that have not been spidered';
     }
     else
     {
