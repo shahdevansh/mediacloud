@@ -65,7 +65,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4431;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4432;
     
 BEGIN
 
@@ -1974,7 +1974,7 @@ CREATE INDEX activities_object_id ON activities (object_id);
 
 
 -- Get random download's ID that is expected to be present in both GridFS and S3
-CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEGER) RETURNS integer AS $$
+CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(min_downloads_id INTEGER, max_downloads_id INTEGER) RETURNS integer AS $$
 
     DECLARE
         result INTEGER;
@@ -1983,9 +1983,11 @@ CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEG
     BEGIN
 
         <<find_random_downloads_id>>
-        LOOP        
-            -- Generate a random download ID
-            SELECT (max_downloads_id * random())::int INTO random_downloads_id;
+        LOOP
+
+            -- Generate a random download ID in the [min_downloads_id; max_downloads_id] range
+            SELECT (RANDOM() * (max_downloads_id - min_downloads_id) + min_downloads_id)::int
+                INTO random_downloads_id;
 
             RAISE NOTICE 'Attempting to fetch download %', random_downloads_id;
 
@@ -2014,7 +2016,7 @@ CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEG
 
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEGER) IS '
+COMMENT ON FUNCTION get_random_gridfs_downloads_id(min_downloads_id INTEGER, max_downloads_id INTEGER) IS '
     Get a random download ID that is stored in GridFS and thus is expected to be backed up to S3.
 
     Treat Tar, file and GridFS downloads alike (it is expected that all of those are stored in GridFS).
@@ -2023,9 +2025,10 @@ COMMENT ON FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEGER) IS 
     to verify whether or not GridFS downloads are being successfully backed up to S3.
 
     Usage example (in plpgsql):
+        SELECT MIN(downloads_id) INTO min_downloads_id FROM downloads;
         SELECT MAX(downloads_id) INTO max_downloads_id FROM downloads;
-        SELECT get_random_gridfs_downloads_id(max_downloads_id) AS random_downloads_id;
-    ';
+        SELECT get_random_gridfs_downloads_id(min_downloads_id, max_downloads_id) AS random_downloads_id;
+';
 
 
 --

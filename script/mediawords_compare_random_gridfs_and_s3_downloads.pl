@@ -29,7 +29,7 @@ BEGIN
 }
 
 use MediaWords::DB;
-use Modern::Perl "2012";
+use Modern::Perl "2013";
 use MediaWords::CommonLibs;
 use MediaWords::DBI::Downloads::Store::GridFS;
 use MediaWords::DBI::Downloads::Store::AmazonS3;
@@ -39,9 +39,12 @@ use Data::Dumper;
 # Default number of randomly chosen downloads to compare
 use constant DEFAULT_NUMBER_OF_DOWNLOADS_TO_COMPARE => 1000;
 
-# Should the script select only from downloads fetched no later than day before yesterday
+# Should the script select only from downloads fetched no later than yesterday
 # (useful if you're backing up downloads to S3 at midnight)
-use constant CHOOSE_FROM_DOWNLOADS_ORDER_THAN_DAY_BEFORE_YESTERDAY => 1;
+use constant CHOOSE_FROM_DOWNLOADS_ORDER_THAN_YESTERDAY => 1;
+
+# Should the script select only from downloads fetched no sonner than one month ago
+use constant CHOOSE_FROM_DOWNLOADS_NEWER_THAN_ONE_MONTH => 1;
 
 # Returns true if the downloads table contains at least one download that
 # is stored to GridFS and is expected to be backed up to S3 (and thus the
@@ -100,12 +103,14 @@ EOF
 # Dies on error
 sub _max_downloads_id($$)
 {
-    my ( $db, $choose_from_downloads_order_than_day_before_yesterday ) = @_;
+    my ( $db, $choose_from_downloads_order_than_yesterday ) = @_;
 
     my $sql = '';
-    if ( $choose_from_downloads_order_than_day_before_yesterday )
+    if ( $choose_from_downloads_order_than_yesterday )
     {
         $sql = <<EOF;
+            -- Fetch any downloads_id between "now minus two days"
+            -- and "now minus one day". Nnot very precise, but very fast.
             SELECT downloads_id AS max_downloads_id
             FROM downloads
             WHERE download_time > DATE_TRUNC('day', NOW()) - INTERVAL '2 days'
@@ -127,6 +132,43 @@ EOF
     }
 
     return $max_downloads_id;
+}
+
+# Min. download's ID that is expected to be backed up to S3
+# Params: database object,
+# Returns: min. download's ID
+# Dies on error
+sub _min_downloads_id($$)
+{
+    my ( $db, $choose_from_downloads_newer_than_one_month ) = @_;
+
+    my $sql = '';
+    if ( $choose_from_downloads_newer_than_one_month )
+    {
+        $sql = <<EOF;
+            -- Fetch any downloads_id between "now minus 32 days"
+            -- and "now minus 31 days". Nnot very precise, but very fast.
+            SELECT downloads_id AS max_downloads_id
+            FROM downloads
+            WHERE download_time > DATE_TRUNC('day', NOW()) - INTERVAL '32 days'
+              AND download_time < DATE_TRUNC('day', NOW()) - INTERVAL '31 days'
+            LIMIT 1
+EOF
+    }
+    else
+    {
+        $sql = <<EOF;
+        SELECT MIN(downloads_id) AS min_downloads_id
+        FROM downloads
+EOF
+    }
+    my ( $min_downloads_id ) = $db->query( $sql )->flat;
+    unless ( defined $min_downloads_id )
+    {
+        die "Unable to fetch min. downloads ID.";
+    }
+
+    return $min_downloads_id;
 }
 
 # Fetch download from the designated store, print verbose messages along the way
@@ -192,7 +234,8 @@ sub compare_random_gridfs_and_s3_downloads($)
     }
 
     # Select the biggest download ID that might be available in S3
-    my $max_downloads_id = _max_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_ORDER_THAN_DAY_BEFORE_YESTERDAY );
+    my $max_downloads_id = _max_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_ORDER_THAN_YESTERDAY );
+    my $min_downloads_id = _min_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_NEWER_THAN_ONE_MONTH );
 
     say STDERR "Will fetch $number_of_downloads_to_compare random downloads up until download $max_downloads_id.";
 
@@ -203,9 +246,9 @@ sub compare_random_gridfs_and_s3_downloads($)
     {
         my $downloads_id = $db->query(
             <<EOF,
-            SELECT get_random_gridfs_downloads_id(?) AS random_downloads_id
+            SELECT get_random_gridfs_downloads_id(?, ?) AS random_downloads_id
 EOF
-            $max_downloads_id
+            $min_downloads_id, $max_downloads_id
         )->hash;
         unless ( $downloads_id and $downloads_id->{ random_downloads_id } )
         {
