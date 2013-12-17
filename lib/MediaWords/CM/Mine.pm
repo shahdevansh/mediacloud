@@ -36,7 +36,9 @@ use constant ALL_TAG => 'all';
 # ignore links that match this pattern
 my $_ignore_link_pattern =
   '(www.addtoany.com)|(novostimira.com)|(ads\.pheedo)|(www.dailykos.com\/user)|' .
-  '(livejournal.com\/(tag|profile))|(sfbayview.com\/tag)|(absoluteastronomy.com)';
+  '(livejournal.com\/(tag|profile))|(sfbayview.com\/tag)|(absoluteastronomy.com)|' .
+  '(\/share.*http)|(digg.com\/submit)|(facebook.com.*mediacontentsharebutton)|' .
+  '(feeds.wordpress.com\/.*\/go)|(sharetodiaspora.github.io\/)';
 
 # cache of media by media id
 my $_media_cache = {};
@@ -436,7 +438,7 @@ sub extract_download
 
     return if ( $download->{ url } =~ /livejournal.com\/(tag|profile)/i );
 
-    eval { MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, "controversy", 1, 1 ); };
+    eval { MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, "controversy", 1, 1, 1 ); };
     warn "extract error processing download $download->{ downloads_id }" if ( $@ );
 }
 
