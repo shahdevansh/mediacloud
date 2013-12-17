@@ -15,14 +15,17 @@ use Date::Format;
 use Encode;
 
 use MediaWords::DB;
+use MediaWords::DBI::Downloads;
 use MediaWords::Util::SQL;
 use MediaWords::Util::Web;
 
+use URI::Split;
+
 use constant WAPO_MEDIA_ID => 2;
 use constant START_DATE    => '2012-09-01';
-use constant END_DATE      => '2012-09-02';
+use constant END_DATE      => '2013-11-16';
 
-#use constant END_DATE => '2013-06-01';
+my $_story_lookup;
 
 # get teh content for the archvie page for the given date
 sub get_archive_page_content
@@ -38,24 +41,39 @@ sub get_archive_page_content
     return $html;
 }
 
+# extract the story for the given download
+sub extract_download
+{
+    my ( $db, $download ) = @_;
+
+    return if ( $download->{ url } =~ /jpg|pdf|doc|mp3|mp4|zip$/i );
+
+    return if ( $download->{ url } =~ /livejournal.com\/(tag|profile)/i );
+
+    eval { MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, "controversy", 1, 1 ); };
+    warn "extract error processing download $download->{ downloads_id }" if ( $@ );
+}
+
 # import a story with the given url, title, and date into the given medium and feed
 # if it does not already exist
 sub import_story
 {
     my ( $db, $url, $title, $date, $medium, $feed ) = @_;
 
-    my $existing_story = $db->query( <<'END', $medium->{ media_id }, $title, $url )->hash;
+    $url = "http://articles.washingtonpost.com/$url" unless ( $url =~ /^http/ );
+
+    my $existing_story = $db->query( <<END, $title, $url )->hash;
 select * 
     from stories 
     where 
-        media_id = $1 and 
-        ( ( lower( title ) = lower( $2 ) ) or
-          ( url = $3 ) or
-          ( guid = $3 ) )
+        media_id = $medium->{ media_id } and 
+        ( ( lower( title ) = lower( \$1 ) ) or
+          ( url = \$2 ) or
+          ( guid = \$2 ) )
 END
     if ( $existing_story )
     {
-        print STDERR "exising story\n";
+        print STDERR "existing story\n";
         return;
     }
 
@@ -98,7 +116,7 @@ END
 
     if ( $content )
     {
-        MediaWords::DBI::Downloads::store_content_determinedly( $db, $download, \$content );
+        MediaWords::DBI::Downloads::store_content_determinedly( $db, $download, $content );
         extract_download( $db, $download );
     }
     else
