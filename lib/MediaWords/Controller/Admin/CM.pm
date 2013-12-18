@@ -17,6 +17,7 @@ use MediaWords::DBI::Activities;
 use MediaWords::Solr;
 use MediaWords::GearmanFunction;
 use MediaWords::GearmanFunction::CM::DumpControversy;
+use MediaWords::DBI::Stories;
 
 use constant ROWS_PER_PAGE => 25;
 
@@ -905,6 +906,8 @@ sub story : Local
         $latest_controversy_dump = _get_latest_controversy_dump( $db, $cdts );
     }
 
+    $story->{ extracted_text } = MediaWords::DBI::Stories::get_extracted_text( $db, $story );
+
     $db->commit;
 
     my $confirm_remove = $c->req->params->{ confirm_remove };
@@ -1004,7 +1007,8 @@ sub remove_stories : Local
 
     for my $stories_id ( @{ $stories_ids } )
     {
-        _remove_story_from_controversy( $db, $stories_id, $controversies_id, $c->user->username, $c->req->params->{ reason } );
+        _remove_story_from_controversy( $db, $stories_id, $controversies_id, $c->user->username,
+            $c->req->params->{ reason } );
     }
 
     my $status_msg = scalar( @{ $stories_ids } ) . " stories removed from controversy.";
@@ -1084,9 +1088,8 @@ END
         $db->begin;
 
         eval {
-            map {
-                _remove_story_from_controversy( $db, $_->{ stories_id }, $controversies_id, $c->user->username, $reason )
-            } @{ $stories };
+            map { _remove_story_from_controversy( $db, $_->{ stories_id }, $controversies_id, $c->user->username, $reason ) }
+              @{ $stories };
         };
         if ( $@ )
         {
@@ -1191,9 +1194,7 @@ sub _remove_story_from_controversy($$$$$$)
         MediaWords::CM::Mine::remove_story_from_controversy( $db, $stories_id, $controversies_id );
 
         # Log the activity
-        my $change = {
-            'stories_id' => $stories_id + 0
-        };
+        my $change = { 'stories_id' => $stories_id + 0 };
         unless (
             MediaWords::DBI::Activities::log_activity(
                 $db, 'cm_remove_story_from_controversy',
