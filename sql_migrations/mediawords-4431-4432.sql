@@ -17,8 +17,59 @@
 
 SET search_path = public, pg_catalog;
 
-DROP FUNCTION get_random_gridfs_downloads_id(max_downloads_id INTEGER);
+DROP TRIGGER stories_update_story_sentences_last_updated_trigger ON stories;
 
+DROP TRIGGER stories_tags_map_update_stories_last_updated_trigger ON stories_tags_map;
+
+DROP TRIGGER IF EXISTS media_tags_map_update_stories_last_updated_trigger ON media_tags_map;
+DROP TRIGGER IF EXISTS media_sets_media_map_update_stories_last_updated_trigger on media_sets_media_map;
+
+DROP FUNCTION update_stories_updated_time_trigger();
+
+CREATE OR REPLACE FUNCTION update_stories_updated_time_by_stories_id_trigger() RETURNS trigger AS
+$$
+   DECLARE
+      path_change boolean;
+   BEGIN
+	UPDATE stories set db_row_last_updated = now() where stories_id = OLD.stories_id;
+	RETURN NULL;
+   END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE OR REPLACE FUNCTION update_stories_updated_time_by_media_id_trigger() RETURNS trigger AS
+$$
+   DECLARE
+      path_change boolean;
+   BEGIN
+	UPDATE stories set db_row_last_updated = now() where media_id = OLD.media_id;
+	RETURN NULL;
+   END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE TRIGGER media_tags_map_update_stories_last_updated_trigger
+	AFTER INSERT OR UPDATE OR DELETE ON media_tags_map
+	FOR EACH ROW
+	EXECUTE PROCEDURE update_stories_updated_time_by_media_id_trigger();
+
+CREATE TRIGGER media_sets_media_map_update_stories_last_updated_trigger
+	AFTER INSERT OR UPDATE OR DELETE ON media_sets_media_map
+	FOR EACH ROW
+	EXECUTE PROCEDURE update_stories_updated_time_by_media_id_trigger();
+
+CREATE TRIGGER stories_update_story_sentences_last_updated_trigger
+	AFTER INSERT OR UPDATE ON stories
+	FOR EACH ROW
+	EXECUTE PROCEDURE update_story_sentences_updated_time_trigger() ;
+
+CREATE TRIGGER stories_tags_map_update_stories_last_updated_trigger
+	AFTER INSERT OR UPDATE OR DELETE ON stories_tags_map
+	FOR EACH ROW
+	EXECUTE PROCEDURE update_stories_updated_time_by_stories_id_trigger();
+
+
+-- Get random download's ID that is expected to be present in both GridFS and S3
 CREATE OR REPLACE FUNCTION get_random_gridfs_downloads_id(min_downloads_id INTEGER, max_downloads_id INTEGER) RETURNS integer AS $$
 
     DECLARE
@@ -75,9 +126,7 @@ COMMENT ON FUNCTION get_random_gridfs_downloads_id(min_downloads_id INTEGER, max
         SELECT get_random_gridfs_downloads_id(min_downloads_id, max_downloads_id) AS random_downloads_id;
 ';
 
---
--- 2 of 2. Reset the database version.
---
+
 CREATE OR REPLACE FUNCTION set_database_schema_version() RETURNS boolean AS $$
 DECLARE
     
@@ -97,5 +146,9 @@ END;
 $$
 LANGUAGE 'plpgsql';
 
+
+--
+-- 2 of 2. Reset the database version.
+--
 SELECT set_database_schema_version();
 
