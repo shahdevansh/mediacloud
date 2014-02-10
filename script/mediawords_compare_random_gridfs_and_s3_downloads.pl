@@ -36,9 +36,6 @@ use MediaWords::DBI::Downloads::Store::AmazonS3;
 use Getopt::Long;
 use Data::Dumper;
 
-# Default number of randomly chosen downloads to compare
-use constant DEFAULT_NUMBER_OF_DOWNLOADS_TO_COMPARE => 1000;
-
 # Should the script select only from downloads fetched no later than yesterday
 # (useful if you're backing up downloads to S3 at midnight)
 use constant CHOOSE_FROM_DOWNLOADS_ORDER_THAN_YESTERDAY => 1;
@@ -301,9 +298,9 @@ sub main
     binmode( STDERR, ':utf8' );
 
     # (optional) number of downloads to compare
-    my $number_of_downloads_to_compare = DEFAULT_NUMBER_OF_DOWNLOADS_TO_COMPARE;
+    my $number_of_downloads_to_compare = 1000;
 
-    my Readonly $usage = 'Usage: ' . $0 . ' [--number_of_downloads_to_compare=count]';
+    my Readonly $usage = 'Usage: ' . $0 . ' [--number_of_downloads_to_compare=' . $number_of_downloads_to_compare . ']';
 
     GetOptions( 'number_of_downloads_to_compare:i' => \$number_of_downloads_to_compare, ) or die "$usage\n";
     if ( $number_of_downloads_to_compare < 1 )
