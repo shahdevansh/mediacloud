@@ -147,7 +147,7 @@ sub _min_downloads_id($$)
     {
         $sql = <<EOF;
             -- Fetch any downloads_id between "now minus 32 days"
-            -- and "now minus 31 days". Nnot very precise, but very fast.
+            -- and "now minus 31 days". Not very precise, but very fast.
             SELECT downloads_id AS max_downloads_id
             FROM downloads
             WHERE download_time > DATE_TRUNC('day', NOW()) - INTERVAL '32 days'
