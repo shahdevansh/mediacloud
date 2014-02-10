@@ -207,7 +207,7 @@ EOF
         $downloads_id = $downloads_id->{ random_downloads_id };
 
         # Compare
-        say STDERR "Testing download ID $downloads_id...";
+        say STDERR '#' . ( $x + 1 ) . "/$number_of_downloads_to_compare. Testing download ID $downloads_id...";
 
         my $gridfs_content = _fetch_download( $db, $gridfs_store, $downloads_id );
         my $s3_content     = _fetch_download( $db, $s3_store,     $downloads_id );
