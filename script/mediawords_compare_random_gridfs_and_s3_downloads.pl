@@ -124,14 +124,14 @@ EOF
 # Fetch download from the designated store, print verbose messages along the way
 # Returns: download's contents or undef (if unable to fetch the download)
 # Dies on error
-sub _fetch_download($$)
+sub _fetch_download($$$)
 {
-    my ( $download_store, $downloads_id ) = @_;
+    my ( $db, $download_store, $downloads_id ) = @_;
 
     my $download = { downloads_id => $downloads_id };
 
     my $content_ref = undef;
-    eval { $content_ref = $download_store->fetch_content( $download ); };
+    eval { $content_ref = $download_store->fetch_content( $db, $download ); };
     if ( $@ )
     {
         say STDERR "\tUnable to fetch download $downloads_id from " . ref( $download_store ) . ": $@";
@@ -209,8 +209,8 @@ EOF
         # Compare
         say STDERR "Testing download ID $downloads_id...";
 
-        my $gridfs_content = _fetch_download( $gridfs_store, $downloads_id );
-        my $s3_content     = _fetch_download( $s3_store,     $downloads_id );
+        my $gridfs_content = _fetch_download( $db, $gridfs_store, $downloads_id );
+        my $s3_content     = _fetch_download( $db, $s3_store,     $downloads_id );
 
         my $downloads_are_equal = 0;
         if ( defined( $gridfs_content ) and defined( $s3_content ) )
@@ -221,6 +221,11 @@ EOF
                 # Both were successfully fetched and are equal
                 $downloads_are_equal = 1;
             }
+            else
+            {
+                # Both were successfully fetched but the contents are not equal
+                $downloads_are_equal = 0;
+            }
         }
         else
         {
@@ -228,8 +233,14 @@ EOF
             $downloads_are_equal = 0;
         }
 
-        unless ( $downloads_are_equal )
+        if ( $downloads_are_equal )
         {
+            say STDERR "\tOK";
+        }
+        else
+        {
+
+            $all_downloads_are_equal = 0;
 
             say STDERR "\tDownload ID $downloads_id mismatch:";
             say STDERR "\t\tGridFS download length: " . ( defined( $gridfs_content ) ? length( $gridfs_content ) : 'undef' );
@@ -239,8 +250,6 @@ EOF
                 my $diff = diff \$gridfs_content, \$s3_content, { STYLE => 'Unified' };
                 say STDERR "\t\tDiff between GridFS (-) and S3 downloads:\n$diff";
             }
-
-            $all_downloads_are_equal = 0;
         }
 
     }
