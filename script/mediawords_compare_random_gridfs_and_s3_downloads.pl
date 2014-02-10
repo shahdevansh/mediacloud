@@ -10,13 +10,18 @@
 #
 # Usage:
 #
-#   # Will compare 1000 random downloads
+#   # Will compare 1000 randomly selected downloads in the interval between
+#   # ~30 days old and ~1 day old
 #   ./script/mediawords_compare_random_gridfs_and_s3_downloads.pl
 #
 # or
 #
+#   # Will compare 100 randomly selected downloads in the interval between
+#   # ~7 days old and ~1 day old
 #   ./script/mediawords_compare_random_gridfs_and_s3_downloads.pl \
-#       [--number_of_downloads_to_compare=count]
+#       --number_of_downloads_to_compare=100 \
+#       --lower_interval="7 days" \
+#       --upper_interval="1 day"
 #
 
 use strict;
@@ -35,13 +40,6 @@ use MediaWords::DBI::Downloads::Store::GridFS;
 use MediaWords::DBI::Downloads::Store::AmazonS3;
 use Getopt::Long;
 use Data::Dumper;
-
-# Should the script select only from downloads fetched no later than yesterday
-# (useful if you're backing up downloads to S3 at midnight)
-use constant CHOOSE_FROM_DOWNLOADS_ORDER_THAN_YESTERDAY => 1;
-
-# Should the script select only from downloads fetched no sonner than one month ago
-use constant CHOOSE_FROM_DOWNLOADS_NEWER_THAN_ONE_MONTH => 1;
 
 # Returns true if the downloads table contains at least one download that
 # is stored to GridFS and is expected to be backed up to S3 (and thus the
@@ -94,78 +92,30 @@ EOF
     return $downloads_avg_row_count;
 }
 
-# Max. download's ID that is expected to be backed up to S3
-# Params: database object,
-# Returns: max. download's ID
+# Select and return a download ID on the specified interval
+# Params: database object, interval
+# Returns: download ID (up to 1 day older than the given interval)
 # Dies on error
-sub _max_downloads_id($$)
+sub _downloads_id_for_interval($$)
 {
-    my ( $db, $choose_from_downloads_order_than_yesterday ) = @_;
+    my ( $db, $interval ) = @_;
 
-    my $sql = '';
-    if ( $choose_from_downloads_order_than_yesterday )
-    {
-        $sql = <<EOF;
-            -- Fetch any downloads_id between "now minus two days"
-            -- and "now minus one day". Nnot very precise, but very fast.
+    my ( $downloads_id ) = $db->query(
+        <<EOF,
             SELECT downloads_id AS max_downloads_id
             FROM downloads
-            WHERE download_time > DATE_TRUNC('day', NOW()) - INTERVAL '2 days'
-              AND download_time < DATE_TRUNC('day', NOW()) - INTERVAL '1 day'
+            WHERE download_time > NOW() - INTERVAL ? - INTERVAL '1 days'
+              AND download_time < NOW() - INTERVAL ?
             LIMIT 1
 EOF
-    }
-    else
+        $interval, $interval
+    )->flat;
+    unless ( defined $downloads_id )
     {
-        $sql = <<EOF;
-        SELECT MAX(downloads_id) AS max_downloads_id
-        FROM downloads
-EOF
-    }
-    my ( $max_downloads_id ) = $db->query( $sql )->flat;
-    unless ( defined $max_downloads_id )
-    {
-        die "Unable to fetch max. downloads ID.";
+        die "Unable to fetch download's ID for interval '$interval'.";
     }
 
-    return $max_downloads_id;
-}
-
-# Min. download's ID that is expected to be backed up to S3
-# Params: database object,
-# Returns: min. download's ID
-# Dies on error
-sub _min_downloads_id($$)
-{
-    my ( $db, $choose_from_downloads_newer_than_one_month ) = @_;
-
-    my $sql = '';
-    if ( $choose_from_downloads_newer_than_one_month )
-    {
-        $sql = <<EOF;
-            -- Fetch any downloads_id between "now minus 32 days"
-            -- and "now minus 31 days". Not very precise, but very fast.
-            SELECT downloads_id AS max_downloads_id
-            FROM downloads
-            WHERE download_time > DATE_TRUNC('day', NOW()) - INTERVAL '32 days'
-              AND download_time < DATE_TRUNC('day', NOW()) - INTERVAL '31 days'
-            LIMIT 1
-EOF
-    }
-    else
-    {
-        $sql = <<EOF;
-        SELECT MIN(downloads_id) AS min_downloads_id
-        FROM downloads
-EOF
-    }
-    my ( $min_downloads_id ) = $db->query( $sql )->flat;
-    unless ( defined $min_downloads_id )
-    {
-        die "Unable to fetch min. downloads ID.";
-    }
-
-    return $min_downloads_id;
+    return $downloads_id;
 }
 
 # Fetch download from the designated store, print verbose messages along the way
@@ -212,9 +162,9 @@ sub _fetch_download($$)
 # Returns true if all the downloads are equal
 # Returns false and prints out a warning to STDERR if one or more of downloads are not equal
 # Dies on error
-sub compare_random_gridfs_and_s3_downloads($)
+sub compare_random_gridfs_and_s3_downloads($$$)
 {
-    my ( $number_of_downloads_to_compare ) = @_;
+    my ( $number_of_downloads_to_compare, $lower_interval, $upper_interval ) = @_;
 
     my $db           = MediaWords::DB::connect_to_db                      or die "Unable to connect to PostgreSQL.";
     my $gridfs_store = MediaWords::DBI::Downloads::Store::GridFS->new()   or die "Unable to connect to GridFS.";
@@ -231,8 +181,8 @@ sub compare_random_gridfs_and_s3_downloads($)
     }
 
     # Select the biggest download ID that might be available in S3
-    my $max_downloads_id = _max_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_ORDER_THAN_YESTERDAY );
-    my $min_downloads_id = _min_downloads_id( $db, CHOOSE_FROM_DOWNLOADS_NEWER_THAN_ONE_MONTH );
+    my $min_downloads_id = _downloads_id_for_interval( $db, $lower_interval );
+    my $max_downloads_id = _downloads_id_for_interval( $db, $upper_interval );
 
     say STDERR "Will fetch $number_of_downloads_to_compare random downloads up until download $max_downloads_id.";
 
@@ -299,20 +249,33 @@ sub main
 
     # (optional) number of downloads to compare
     my $number_of_downloads_to_compare = 1000;
+    my $lower_interval                 = '30 days';
+    my $upper_interval                 = '1 day';
 
-    my Readonly $usage = 'Usage: ' . $0 . ' [--number_of_downloads_to_compare=' . $number_of_downloads_to_compare . ']';
+    my Readonly $usage =
+      'Usage: ' . $0 . ' [--number_of_downloads_to_compare=' . $number_of_downloads_to_compare .
+      ']' . ' [--lower_interval="' . $lower_interval . '"]' . ' [--upper_interval="' . $upper_interval . '"]';
 
-    GetOptions( 'number_of_downloads_to_compare:i' => \$number_of_downloads_to_compare, ) or die "$usage\n";
-    if ( $number_of_downloads_to_compare < 1 )
+    GetOptions(
+        'number_of_downloads_to_compare:i' => \$number_of_downloads_to_compare,
+        'lower_interval:s'                 => \$lower_interval,
+        'upper_interval:s'                 => \$upper_interval,
+    ) or die "$usage\n";
+    if ( $number_of_downloads_to_compare < 1 or ( !$lower_interval ) or ( !$upper_interval ) )
     {
         die "$usage";
     }
 
     say STDERR "starting --  " . localtime();
     say STDERR "Will compare $number_of_downloads_to_compare downloads";
+    say STDERR "Approx. lower date bound: NOW() - INTERVAL '$lower_interval'";
+    say STDERR "Approx. upper date bound: NOW() - INTERVAL '$upper_interval'";
 
     my $result = 0;    # fail by default
-    eval { $result = compare_random_gridfs_and_s3_downloads( $number_of_downloads_to_compare ); };
+    eval {
+        $result =
+          compare_random_gridfs_and_s3_downloads( $number_of_downloads_to_compare, $lower_interval, $upper_interval );
+    };
     if ( $@ )
     {
         die "The compare script died while comparing downloads: $@\n";
@@ -320,14 +283,12 @@ sub main
 
     say STDERR "finished --  " . localtime();
 
-    if ( $result )
-    {
-        say STDERR "All $number_of_downloads_to_compare downloads are equal.";
-    }
-    else
+    unless ( $result )
     {
         die "One or more downloads in GridFS and S3 are not equal.\n";
     }
+
+    say STDERR "All $number_of_downloads_to_compare downloads are equal.";
 }
 
 main();
