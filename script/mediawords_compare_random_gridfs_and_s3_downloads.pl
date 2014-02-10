@@ -39,6 +39,7 @@ use MediaWords::CommonLibs;
 use MediaWords::DBI::Downloads::Store::GridFS;
 use MediaWords::DBI::Downloads::Store::AmazonS3;
 use Getopt::Long;
+use Text::Diff;
 use Data::Dumper;
 
 # Returns true if the downloads table contains at least one download that
@@ -229,10 +230,13 @@ EOF
         {
 
             say STDERR "\tDownload ID $downloads_id mismatch:";
-            say STDERR "\t\tDownload ID $downloads_id as fetched from GridFS: " .
-              ( defined( $gridfs_content ) ? 'length = ' . length( $gridfs_content ) : 'undef' );
-            say STDERR "\t\tDownload ID $downloads_id as fetched from S3: " .
-              ( defined( $s3_content ) ? 'length = ' . length( $s3_content ) : 'undef' );
+            say STDERR "\t\tGridFS download length: " . ( defined( $gridfs_content ) ? length( $gridfs_content ) : 'undef' );
+            say STDERR "\t\tS3 download length: " .     ( defined( $s3_content )     ? length( $s3_content )     : 'undef' );
+            if ( defined( $gridfs_content ) and defined( $s3_content ) )
+            {
+                my $diff = diff \$gridfs_content, \$s3_content, { STYLE => 'Unified' };
+                say STDERR "\t\tDiff between GridFS (-) and S3 downloads:\n$diff";
+            }
 
             $all_downloads_are_equal = 0;
         }
