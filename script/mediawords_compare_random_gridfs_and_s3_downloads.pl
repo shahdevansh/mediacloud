@@ -101,15 +101,17 @@ sub _downloads_id_for_interval($$)
 {
     my ( $db, $interval ) = @_;
 
+    # quote() will add single quotes ('')
+    $interval = $db->dbh->quote( $interval );
+
     my ( $downloads_id ) = $db->query(
-        <<EOF,
+        <<"EOF"
             SELECT downloads_id AS max_downloads_id
             FROM downloads
-            WHERE download_time > NOW() - INTERVAL ? - INTERVAL '1 days'
-              AND download_time < NOW() - INTERVAL ?
+            WHERE download_time > NOW() - INTERVAL $interval - INTERVAL '1 days'
+              AND download_time < NOW() - INTERVAL $interval
             LIMIT 1
 EOF
-        $interval, $interval
     )->flat;
     unless ( defined $downloads_id )
     {
