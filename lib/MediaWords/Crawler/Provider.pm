@@ -141,6 +141,8 @@ sub _add_stale_feeds
     my $constraint = "((last_attempted_download_time IS NULL " . "OR (last_attempted_download_time < (NOW() - interval ' " .
       STALE_FEED_INTERVAL . " seconds')) OR $last_new_story_time_clause ) " . "AND url ~ 'https?://')";
 
+    $dbs->query( "drop table if exists feeds_to_queue" );
+
     $dbs->query( <<END );
 create temporary table feeds_to_queue as 
     select feeds_id, url from feeds 
@@ -175,6 +177,8 @@ END
         $download->{ _media_id } = $medium->{ media_id };
         $self->{ downloads }->_queue_download( $download );
     }
+
+    $dbs->query( "drop table feeds_to_queue" );
 
     print STDERR "end _add_stale_feeds\n";
 
