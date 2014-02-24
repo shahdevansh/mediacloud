@@ -1,8 +1,6 @@
 #!/usr/bin/env perl
 
-#
-# Enqueue MediaWords::GearmanFunction::CM::DumpControversy job
-#
+# dump various controversy queries to csv and build a gexf file
 
 use strict;
 
@@ -14,22 +12,13 @@ BEGIN
 
 use Getopt::Long;
 
-use MediaWords::CommonLibs;
 use MediaWords::CM::Dump;
 use MediaWords::DB;
 use MediaWords::DBI::Controversies;
-use MediaWords::GearmanFunction;
-use MediaWords::GearmanFunction::CM::DumpControversy;
-use Gearman::JobScheduler;
 
 sub main
 {
     my ( $controversy_opt );
-
-    unless ( MediaWords::GearmanFunction::gearman_is_enabled() )
-    {
-        die "Gearman is disabled.";
-    }
 
     binmode( STDOUT, 'utf8' );
     binmode( STDERR, 'utf8' );
@@ -39,34 +28,17 @@ sub main
 
     die( "Usage: $0 --controversy < id >" ) unless ( $controversy_opt );
 
-    my $db = MediaWords::DB::connect_to_db();
+    my $db = MediaWords::DB::connect_to_db;
+
     my $controversies = MediaWords::DBI::Controversies::require_controversies_by_opt( $db, $controversy_opt );
-    $db->disconnect;
 
     for my $controversy ( @{ $controversies } )
     {
-        my $args = { controversies_id => $controversy->{ controversies_id } };
-        my $gearman_job_id = MediaWords::GearmanFunction::CM::DumpControversy->enqueue_on_gearman( $args );
-        say STDERR
-"Enqueued controversy ID $controversy->{ controversies_id } ('$controversy->{ name }') on Gearman with job ID: $gearman_job_id";
-
-        # The following call might fail if the job takes some time to start,
-        # so consider adding:
-        #     sleep(1);
-        # before calling log_path_for_gearman_job()
-        my $log_path =
-          Gearman::JobScheduler::log_path_for_gearman_job( MediaWords::GearmanFunction::CM::DumpControversy->name(),
-            $gearman_job_id );
-        if ( $log_path )
-        {
-            say STDERR "The job is writing its log to: $log_path";
-        }
-        else
-        {
-            say STDERR "The job probably hasn't started yet, so I don't know where does the log reside";
-        }
+        $db->disconnect;
+        $db = MediaWords::DB::connect_to_db;
+        print "CONTROVERSY $controversy->{ name } \n";
+        MediaWords::CM::Dump::dump_controversy( $db, $controversy->{ controversies_id } );
     }
-
 }
 
 main();
