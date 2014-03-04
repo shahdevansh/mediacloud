@@ -77,10 +77,10 @@ sub _get_stories_from_feed_contents_impl
         my $url  = $item->link() || $item->guid();
         my $guid = $item->guid() || $item->link();
 
-        if ( !$url && !$guid )
-        {
-            next ITEM;
-        }
+        next ITEM unless ( $url );
+
+        $url  = substr( $url,  0, 1024 );
+        $guid = substr( $guid, 0, 1024 );
 
         $url =~ s/[\n\r\s]//g;
 
@@ -270,7 +270,7 @@ sub get_story_title_from_content
 
     if ( $_[ 0 ] =~ m~<title>([^<]+)</title>~si ) { return $1; }
 
-    return $_[ 1 ];
+    return '(no title)';
 }
 
 # handle feeds of type 'web_page' by just creating a story to associate
@@ -280,7 +280,7 @@ sub handle_web_page_content
     my ( $dbs, $download, $decoded_content, $feed ) = @_;
 
     my $title = get_story_title_from_content( $decoded_content );
-    my $guid  = time . ":" . $download->{ url };
+    my $guid = substr( time . ":" . $download->{ url }, 0, 1024 );
 
     my $story = $dbs->create(
         'stories',
