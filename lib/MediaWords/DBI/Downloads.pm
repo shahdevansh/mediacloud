@@ -373,7 +373,7 @@ sub store_content($$$)
         $new_state = 'error';
         $download->{ error_message } = $@;
     }
-    else
+    elsif ( $new_state eq 'success' )
     {
         $download->{ error_message } = '';
     }
