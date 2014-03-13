@@ -14,7 +14,7 @@ BEGIN
 }
 
 use Data::Dumper;
-use Modern::Perl "2013";
+use Modern::Perl "2012";
 
 use MediaWords::DB;
 use MediaWords::Crawler::FeedHandler;
