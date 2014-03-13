@@ -43,7 +43,7 @@ END
     for my $download ( @{ $downloads } )
     {
         eval {
-            my $content_ref = MediaWords::DBI::Downloads::fetch_content( $db, $download );
+            my $content_ref = MediaWords::DBI::Downloads::fetch_content( $download );
             print STDERR Dumper( $download );
             print STDERR substr( $$content_ref, 0, 1024 );
 
