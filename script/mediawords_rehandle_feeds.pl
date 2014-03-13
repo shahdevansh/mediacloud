@@ -45,7 +45,7 @@ END
         eval {
             my $content_ref = MediaWords::DBI::Downloads::fetch_content( $download );
             print STDERR Dumper( $download );
-            print STDERR substr( $$content_ref, 0, 1024 );
+            print STDERR encode( 'utf8', substr( $$content_ref, 0, 1024 ) ) . "\n";
 
             if ( length( $$content_ref ) > 32 )
             {
