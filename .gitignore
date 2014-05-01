@@ -1,6 +1,7 @@
 data.old
 matrix
 mediawords.yml
+mediawords-*.yml
 mediacloud.tmproj
 jons_stuff
 .carton
@@ -8,12 +9,18 @@ local
 cache/translate
 
 # Perl::Tidy backup files
+*.pl.bak
 *.pm.bak
 *.t.bak
 
+# Python bytecode files
+*.py[cod]
+
+# Vim backup files
+*.swp
+
 # OS X
 .DS_Store
-*.pl.bak
 
 # Inline::Java
 _Inline/
