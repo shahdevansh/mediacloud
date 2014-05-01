@@ -20,25 +20,39 @@ Catalyst Controller for basic story search page
 
 =cut
 
+# get tag_sets_id for collection: tag set
+sub _get_collection_tag_sets_id
+{
+    my ( $db ) = @_;
+
+    my $tag_set = $db->query( "select * from tag_sets where name = 'collection'" )->hash
+      || die( "Unable to find 'collection' tag set" );
+
+    return $tag_set->{ tag_sets_id };
+}
+
 # list all collection tags, with media set names attached
 sub tags : Local
 {
-    my ( $self, $c ) = @_;
+    my ( $self, $c, $tag_sets_id ) = @_;
 
     my $db = $c->dbis;
 
-    my $tags = $db->query( <<END )->hashes;
-with collection_tags as (
+    $tag_sets_id //= _get_collection_tag_sets_id( $db );
+
+    my $tag_set = $db->find_by_id( 'tag_sets', $tag_sets_id ) || die( "Unable to find tag_set '$tag_sets_id'" );
+
+    my $tags = $db->query( <<END, $tag_sets_id )->hashes;
+with set_tags as (
     
-    select t.* 
-        from tags t 
-            join tag_sets ts on ( t.tag_sets_id = ts.tag_sets_id )
-        where ts.name = 'collection' and
+    select t.* from tags t 
+        where tag_sets_id = ? and
             tags_id not in ( select tags_id from media_sets where include_in_dump = false )
+            
 )
         
 select t.*, ms.media_set_names, mtm.media_count
-    from collection_tags t
+    from set_tags t
     
         left join ( 
             select count(*) media_count, mtm.tags_id 
@@ -60,6 +74,7 @@ select t.*, ms.media_set_names, mtm.media_count
 END
 
     $c->stash->{ tags }     = $tags;
+    $c->stash->{ tag_set }  = $tag_set;
     $c->stash->{ template } = 'search/tags.tt2';
 }
 
@@ -102,14 +117,17 @@ sub index : Path : Args(0)
 
     my $csv = $c->req->params->{ csv };
 
-    my $num_sampled = $csv ? undef : 1000;
-
-    my ( $stories, $num_stories );
-    eval
+    my $solr_params = { q => $q };
+    if ( !$csv )
     {
-        ( $stories, $num_stories ) =
-          MediaWords::Solr::search_for_stories_with_sentences( $db, { q => $q }, $num_sampled, 1 );
-    };
+        $solr_params->{ sort } = 'random_1 asc';
+        $solr_params->{ rows } = 100;
+    }
+
+    my $stories;
+    eval { $stories = MediaWords::Solr::search_for_stories( $db, $solr_params ) };
+
+    my $num_stories = int( MediaWords::Solr::get_last_num_found() / 2 );
 
     if ( $@ =~ /solr.*Bad Request/ )
     {
@@ -117,6 +135,10 @@ sub index : Path : Args(0)
         $c->stash->{ q }          = $q;
         $c->stash->{ l }          = $l;
         $c->stash->{ template }   = 'search/search.tt2';
+    }
+    elsif ( $@ )
+    {
+        die( $@ );
     }
     elsif ( $csv )
     {
@@ -132,9 +154,7 @@ sub index : Path : Args(0)
     {
         $c->stash->{ stories }     = $stories;
         $c->stash->{ num_stories } = $num_stories;
-        $c->stash->{ q }           = $q;
         $c->stash->{ l }           = $l;
-        $c->stash->{ template }    = 'search/search.tt2';
         $c->stash->{ q }           = $q;
         $c->stash->{ template }    = 'search/search.tt2';
     }
@@ -146,7 +166,7 @@ sub wc : Local
     my ( $self, $c ) = @_;
 
     my $q = $c->req->params->{ q };
-    my $l = $c->req->params->{ l };
+    my $l = $c->req->params->{ l } || '';
 
     if ( !$q )
     {
@@ -173,6 +193,10 @@ sub wc : Local
         $c->stash->{ l }          = $l;
         $c->stash->{ template }   = 'search/wc.tt2';
     }
+    elsif ( $@ )
+    {
+        die( $@ );
+    }
     elsif ( $c->req->params->{ csv } )
     {
         my $encoded_csv = MediaWords::Util::CSV::get_hashes_as_encoded_csv( $words );
@@ -197,6 +221,30 @@ sub readme : Local
     my ( $self, $c ) = @_;
 
     $c->stash->{ template } = 'search/readme.tt2';
+}
+
+# list tag sets
+sub tag_sets : Local
+{
+    my ( $self, $c ) = @_;
+
+    my $db = $c->dbis;
+
+    my $tag_sets = $db->query( <<END )->hashes;
+select ts.*
+    from tag_sets ts
+    where 
+        exists ( 
+            select 1 
+                from media_tags_map mtm 
+                    join tags t on ( mtm.tags_id = t.tags_id )
+                where t.tag_sets_id = ts.tag_sets_id
+        )
+    order by name
+END
+
+    $c->stash->{ tag_sets } = $tag_sets;
+    $c->stash->{ template } = 'search/tag_sets.tt2';
 }
 
 1;
