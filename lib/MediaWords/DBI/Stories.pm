@@ -6,6 +6,7 @@ use MediaWords::CommonLibs;
 
 use strict;
 
+use Carp;
 use Encode;
 
 use MediaWords::Util::BigPDLVector qw(vector_new vector_set vector_dot vector_normalize);
@@ -151,7 +152,7 @@ EOF
         $story->{ stories_id }
     )->flat();
 
-    say STDERR "is_fully_extracted query returns $bool";
+    say STDERR "is_fully_extracted query returns $bool [$story->{ stories_id }]";
 
     if ( defined( $bool ) && $bool )
     {
@@ -1034,19 +1035,20 @@ sub add_missing_story_sentences
 sub get_all_sentences
 {
     my ( $db, $story ) = @_;
-    
+
     # Tokenize into sentences
-    my $lang = MediaWords::Languages::Language::language_for_code( $story->{ language } ) ||
-        MediaWords::Languages::Language::default_language();
+    my $lang = MediaWords::Languages::Language::language_for_code( $story->{ language } )
+      || MediaWords::Languages::Language::default_language();
 
     my $text = get_text( $db, $story );
-    
+
     my $raw_sentences = $lang->get_sentences( $text ) || return;
-    
+
     my $all_sentences = [];
     for my $sentence ( @{ $raw_sentences } )
     {
-        my $dup_sentence = $db->query( <<END, $sentence, $story->{ media_id }, $story->{ publish_date }, $story->{ stories_id } )->hash;
+        my $dup_sentence =
+          $db->query( <<END, $sentence, $story->{ media_id }, $story->{ publish_date }, $story->{ stories_id } )->hash;
 select * 
     from story_sentence_counts 
     where sentence_md5 = MD5( ? ) and
@@ -1060,6 +1062,64 @@ END
     }
 
     return $all_sentences;
+}
+
+# given two lists of hashes, $stories and $story_data, each with
+# a stories_id field in each row, assign each key:value pair in
+# story_data to the corresponding row in $stories.  if $list_field
+# is specified, push each the value associate with key in each matching
+# stories_id row in story_data field into a list with the name $list_field
+# in stories
+sub attach_story_data_to_stories
+{
+    my ( $stories, $story_data, $list_field ) = @_;
+
+    return unless ( @{ $story_data } );
+
+    my $story_data_lookup = {};
+    for my $sd ( @{ $story_data } )
+    {
+        if ( $list_field )
+        {
+            $story_data_lookup->{ $sd->{ stories_id } } //= { $list_field => [] };
+            push( $story_data_lookup->{ $sd->{ stories_id } }->{ $list_field }, $sd );
+        }
+        else
+        {
+            $story_data_lookup->{ $sd->{ stories_id } } = $sd;
+        }
+    }
+
+    for my $story ( @{ $stories } )
+    {
+        if ( my $sd = $story_data_lookup->{ $story->{ stories_id } } )
+        {
+            map { $story->{ $_ } = $sd->{ $_ } } keys( %{ $sd } );
+        }
+    }
+}
+
+# call attach_story_data_to_stories_ids with a basic query that includes the fields:
+# stories_id, title, publish_date, url, guid, media_id, language, media_name
+sub attach_story_meta_data_to_stories
+{
+    my ( $db, $stories ) = @_;
+
+    $db->begin;
+
+    my $ids_table = $db->get_temporary_ids_table( [ map { $_->{ stories_id } } @{ $stories } ] );
+
+    my $story_data = $db->query( <<END )->hashes;
+select s.stories_id, s.title, s.publish_date, s.url, s.guid, s.media_id, s.language, m.name media_name
+    from stories s join media m on ( s.media_id = m.media_id )
+    where s.stories_id in ( select id from $ids_table )
+END
+
+    attach_story_data_to_stories( $stories, $story_data );
+
+    $db->commit;
+
+    return $stories;
 }
 
 1;

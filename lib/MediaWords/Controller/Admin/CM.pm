@@ -9,12 +9,14 @@ use Digest::MD5;
 use JSON;
 use List::Compare;
 use Data::Dumper;
+use Gearman::JobScheduler;
 
-use MediaWords::Solr;
+use MediaWords::CM;
 use MediaWords::CM::Dump;
 use MediaWords::CM::Mine;
 use MediaWords::DBI::Activities;
 use MediaWords::DBI::Stories;
+use MediaWords::Solr;
 
 use constant ROWS_PER_PAGE => 25;
 
@@ -22,7 +24,6 @@ use base 'Catalyst::Controller::HTML::FormFu';
 
 sub index : Path : Args(0)
 {
-
     return list( @_ );
 }
 
@@ -34,11 +35,57 @@ sub list : Local
     my $db = $c->dbis;
 
     my $controversies = $db->query( <<END )->hashes;
-select * from controversies_with_search_info order by controversies_id desc
+select * from controversies order by controversies_id desc
 END
 
     $c->stash->{ controversies } = $controversies;
     $c->stash->{ template }      = 'cm/list.tt2';
+}
+
+# show a new controversy form
+sub create : Local
+{
+    my ( $self, $c ) = @_;
+
+    my $form = $c->create_form( { load_config_file => $c->path_to() . '/root/forms/admin/cm/create_controversy.yml' } );
+
+    my $db = $c->dbis;
+
+    $c->stash->{ form }     = $form;
+    $c->stash->{ template } = 'cm/create_controversy.tt2';
+
+    $form->process( $c->request );
+
+    if ( !$form->submitted_and_valid )
+    {
+        # Just show the form
+        return;
+    }
+
+    # At this point the form is submitted
+
+    my $c_name            = $c->req->parameters->{ name } . '';
+    my $c_pattern         = $c->req->parameters->{ pattern } . '';
+    my $c_solr_seed_query = $c->req->parameters->{ solr_seed_query } . '';
+    my $c_description     = $c->req->parameters->{ description } . '';
+
+    unless ( $c_name and $c_pattern and $c_solr_seed_query and $c_description )
+    {
+        $c->stash->{ error_msg } = 'Please fill the form.';
+        return;
+    }
+
+    my $controversy = {
+        name            => $c_name,
+        pattern         => $c_pattern,
+        solr_seed_query => $c_solr_seed_query,
+        description     => $c_description
+    };
+
+    $controversy = $db->create( 'controversies', $controversy );
+
+    my $status_msg = "Controversy has been created.";
+    $c->res->redirect( $c->uri_for( "/admin/cm/view/$controversy->{ controversies_id }", { status_msg => $status_msg } ) );
 }
 
 # add a periods field to the controversy dump
@@ -116,11 +163,14 @@ sub view : Local
     my $db = $c->dbis;
 
     my $controversy = $db->query( <<END, $controversies_id )->hash;
-select * from controversies_with_search_info where controversies_id = ?
+select * from controversies where controversies_id = ?
 END
 
-    my $query = MediaWords::DBI::Queries::find_query_by_id( $db, $controversy->{ queries_id } );
-    $query->{ media_set_names } = MediaWords::DBI::Queries::get_media_set_names( $db, $query ) if ( $query );
+    if ( !$controversy->{ solr_seed_query_run } )
+    {
+        $c->stash->{ status_msg } =
+          "The initial solr seed search has not been run.  Run a 'mine controversy' job to seed the controversy";
+    }
 
     my $controversy_dumps = $db->query( <<END, $controversy->{ controversies_id } )->hashes;
 select * from controversy_dumps where controversies_id = ?
@@ -139,7 +189,7 @@ END
       MediaWords::DBI::Activities::sql_activities_which_reference_column( 'controversies.controversies_id',
         $controversies_id );
     $sql_latest_activities .= ' LIMIT ?';
-    
+
     print STDERR "$sql_latest_activities\n";
 
     my $latest_activities = $db->query( $sql_latest_activities, $LATEST_ACTIVITIES_COUNT )->hashes;
@@ -157,7 +207,6 @@ END
     }
 
     $c->stash->{ controversy }       = $controversy;
-    $c->stash->{ query }             = $query;
     $c->stash->{ controversy_dumps } = $controversy_dumps;
     $c->stash->{ latest_full_dump }  = $latest_full_dump;
     $c->stash->{ latest_activities } = $latest_activities;

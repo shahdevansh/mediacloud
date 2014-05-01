@@ -1,0 +1,37 @@
+auto_fieldset:
+
+elements:
+  - type: Text
+    name: name
+    id: name
+    label: Name
+    comment: Name of the controversy
+    constraints:
+        - Required
+
+  - type: Text
+    name: pattern
+    id: pattern
+    label: Pattern
+    comment: Regular expression for the controversy
+    constraints:
+        - Required
+
+  - type: Text
+    name: solr_seed_query
+    id: solr_seed_query
+    label: "Solr Seed Query"
+    comment: "Query to run against solr to return initial seed of Media Cloud stories"
+    constraints:
+        - Required
+
+  - type: Text
+    name: description
+    id: description
+    label: Description
+    comment: "Human readable description of controversy including a human description of the solr seed query"
+    constraints:
+        - Required
+
+  - type: Submit
+    value: Create

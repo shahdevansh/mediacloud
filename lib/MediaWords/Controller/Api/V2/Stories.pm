@@ -13,6 +13,8 @@ use Moose;
 use namespace::autoclean;
 use List::Compare;
 use Carp;
+
+use MediaWords::DBI::Stories;
 use MediaWords::Solr;
 
 =head1 NAME
@@ -77,127 +79,97 @@ sub get_table_name
 
 sub add_extra_data
 {
-    my ( $self, $c, $items ) = @_;
+    my ( $self, $c, $stories ) = @_;
 
-    my $show_raw_1st_download = $c->req->param( 'raw_1st_download' );
+    return $stories unless ( @{ $stories } && ( $c->req->param( 'raw_1st_download' ) ) );
 
-    $show_raw_1st_download //= 0;
+    my $db = $c->dbis;
 
-    if ( $show_raw_1st_download )
+    $db->begin;
+
+    my $ids_table = $db->get_temporary_ids_table( [ map { $_->{ stories_id } } @{ $stories } ] );
+
+    # it's a bit confusing to use this function to attach data to downloads,
+    # but it works b/c w want one download per story
+    my $downloads = $db->query( <<END )->hashes;
+select d.* 
+    from downloads d
+        join (
+            select min( s.downloads_id ) over ( partition by s.stories_id ) downloads_id
+                from downloads s
+                where s.stories_id in ( select id from $ids_table )
+        ) q on ( d.downloads_id = q.downloads_id )
+END
+
+    my $story_lookup = {};
+    map { $story_lookup->{ $_->{ stories_id } } = $_ } @{ $stories };
+
+    for my $download ( @{ $downloads } )
     {
-        foreach my $story ( @{ $items } )
-        {
-            my $content_ref = MediaWords::DBI::Stories::get_content_for_first_download( $c->dbis, $story );
+        my $story = $story_lookup->{ $download->{ stories_id } };
+        my $content_ref = MediaWords::DBI::Downloads::fetch_content( $db, $download );
 
-            if ( !defined( $content_ref ) )
-            {
-                $story->{ first_raw_download_file }->{ missing } = 'true';
-            }
-            else
-            {
-
-                #say STDERR "got content_ref $$content_ref";
-
-                $story->{ first_raw_download_file } = $$content_ref;
-            }
-        }
+        $story->{ raw_first_download_file } = defined( $content_ref ) ? $$content_ref : { missing => 'true' };
     }
 
-    return $items;
-}
-
-sub _add_nested_data
-{
-
-    my ( $self, $db, $stories ) = @_;
-
-    foreach my $story ( @{ $stories } )
-    {
-        my $story_text = MediaWords::DBI::Stories::get_text_for_word_counts( $db, $story );
-        $story->{ story_text } = $story_text;
-    }
-
-    foreach my $story ( @{ $stories } )
-    {
-        my $fully_extracted = MediaWords::DBI::Stories::is_fully_extracted( $db, $story );
-        $story->{ fully_extracted } = $fully_extracted;
-    }
-
-    foreach my $story ( @{ $stories } )
-    {
-        my $story_sentences =
-          $db->query( "SELECT * from story_sentences where stories_id = ? ORDER by sentence_number", $story->{ stories_id } )
-          ->hashes;
-        $story->{ story_sentences } = $story_sentences;
-    }
-
-    foreach my $story ( @{ $stories } )
-    {
-        say STDERR "adding story tags ";
-        my $story_tags = $db->query(
-"select tags.tags_id, tags.tag, tag_sets.tag_sets_id, tag_sets.name as tag_set from stories_tags_map natural join tags natural join tag_sets where stories_id = ? ORDER by tags_id",
-            $story->{ stories_id }
-        )->hashes;
-        $story->{ story_tags } = $story_tags;
-    }
+    $db->commit;
 
     return $stories;
 }
 
-sub _add_data_to_stories
+sub _add_nested_data
 {
-
     my ( $self, $db, $stories, $show_raw_1st_download ) = @_;
 
-    foreach my $story ( @{ $stories } )
-    {
-        my $story_text = MediaWords::DBI::Stories::get_text_for_word_counts( $db, $story );
-        $story->{ story_text } = $story_text;
-    }
+    return unless ( @{ $stories } );
 
-    foreach my $story ( @{ $stories } )
-    {
-        my $fully_extracted = MediaWords::DBI::Stories::is_fully_extracted( $db, $story );
-        $story->{ fully_extracted } = $fully_extracted;
-    }
+    $db->begin;
 
-    if ( $show_raw_1st_download )
-    {
-        foreach my $story ( @{ $stories } )
-        {
-            my $content_ref = MediaWords::DBI::Stories::get_content_for_first_download( $db, $story );
+    my $ids_table = $db->get_temporary_ids_table( [ map { $_->{ stories_id } } @{ $stories } ] );
 
-            if ( !defined( $content_ref ) )
-            {
-                $story->{ first_raw_download_file }->{ missing } = 'true';
-            }
-            else
-            {
+    my $story_text_data = $db->query( <<END )->hashes;
+select s.stories_id,
+        case when BOOL_AND( m.full_text_rss ) then s.description
+            else string_agg( dt.download_text, E'.\n\n' )
+        end story_text
+    from stories s
+        join media m on ( s.media_id = m.media_id )
+        join downloads d on ( s.stories_id = d.stories_id )
+        left join download_texts dt on ( d.downloads_id = dt.downloads_id )
+    where s.stories_id in ( select id from $ids_table )
+    group by s.stories_id
+END
+    MediaWords::DBI::Stories::attach_story_data_to_stories( $stories, $story_text_data );
 
-                #say STDERR "got content_ref $$content_ref";
+    my $extracted_data = $db->query( <<END )->hashes;
+select s.stories_id,
+        BOOL_AND( extracted ) is_fully_extracted
+    from stories s
+        join downloads d on ( s.stories_id = d.stories_id )
+    where s.stories_id in ( select id from $ids_table )
+    group by s.stories_id
+END
+    MediaWords::DBI::Stories::attach_story_data_to_stories( $stories, $extracted_data );
 
-                $story->{ first_raw_download_file } = $$content_ref;
-            }
-        }
-    }
+    my $sentences = $db->query( <<END )->hashes;
+select s.* 
+    from story_sentences s
+    where s.stories_id in ( select id from $ids_table )
+    order by s.sentence_number
+END
+    MediaWords::DBI::Stories::attach_story_data_to_stories( $stories, $sentences, 'story_sentences' );
 
-    foreach my $story ( @{ $stories } )
-    {
-        my $story_sentences =
-          $db->query( "SELECT * from story_sentences where stories_id = ? ORDER by sentence_number", $story->{ stories_id } )
-          ->hashes;
-        $story->{ story_sentences } = $story_sentences;
-    }
+    my $tag_data = $db->query( <<END )->hashes;
+select s.stories_id, tags.tags_id, tags.tag, tag_sets.tag_sets_id, tag_sets.name as tag_set 
+    from stories_tags_map s
+        natural join tags 
+        natural join tag_sets 
+    where s.stories_id in ( select id from $ids_table )
+    order by tags_id
+END
+    MediaWords::DBI::Stories::attach_story_data_to_stories( $stories, $tag_data, 'story_tags' );
 
-    foreach my $story ( @{ $stories } )
-    {
-        say STDERR "adding story tags ";
-        my $story_tags = $db->query(
-"select tags.tags_id, tags.tag, tag_sets.tag_sets_id, tag_sets.name as tag_set from stories_tags_map natural join tags natural join tag_sets where stories_id = ? ORDER by tags_id",
-            $story->{ stories_id }
-        )->hashes;
-        $story->{ story_tags } = $story_tags;
-    }
+    $db->commit;
 
     return $stories;
 }
@@ -209,107 +181,50 @@ sub _get_list_last_id_param_name
     return "last_processed_stories_id";
 }
 
-sub _max_processed_stories_id
-{
-    my ( $self, $c ) = @_;
-
-    my $params = {};
-
-    $params->{ q } = '*:*';
-
-    $params->{ sort } = "processed_stories_id desc";
-
-    $params->{ rows } = 1;
-
-    my $processed_stories_ids = MediaWords::Solr::search_for_processed_stories_ids( $params );
-
-    my $max_processed_stories_id = $processed_stories_ids->[ 0 ];
-
-    return $max_processed_stories_id;
-}
-
 sub _get_object_ids
 {
     my ( $self, $c, $last_id, $rows ) = @_;
 
-    my $next_id = $last_id + 1;
+    my $q = $c->req->param( 'q' ) || '*:*';
 
-    my $q = $c->req->param( 'q' );
+    my $fq = $c->req->params->{ fq } || [];
+    $fq = [ $fq ] unless ( ref( $fq ) );
 
-    $q //= '*:*';
-
-    my $fq = $c->req->params->{ fq };
-
-    $fq //= [];
-
-    if ( !ref( $fq ) )
-    {
-        $fq = [ $fq ];
-    }
-
-    my $processed_stories_ids = [];
-
-    my $max_processed_stories_id = $self->_max_processed_stories_id( $c );
-
-    say STDERR "max_processed_stories_id = $max_processed_stories_id";
-
-    while ( $next_id <= $max_processed_stories_id && scalar( @$processed_stories_ids ) < $rows )
-    {
-        my $params = {};
-        say STDERR ( Dumper( $processed_stories_ids ) );
-
-        say STDERR ( $next_id );
-
-        $params->{ q } = $q;
-
-        $params->{ fq } = [ @{ $fq }, "processed_stories_id:[ $next_id TO * ]" ];
-
-        $params->{ sort } = "processed_stories_id asc";
-
-        $params->{ rows } = $rows;
-
-        say STDERR ( Dumper( $params ) );
-
-        my $new_stories_ids = MediaWords::Solr::search_for_processed_stories_ids( $params );
-
-        say STDERR Dumper( $new_stories_ids );
-
-        last if scalar( @{ $new_stories_ids } ) == 0;
-
-        push $processed_stories_ids, @{ $new_stories_ids };
-
-        die unless scalar( @$processed_stories_ids );
-
-        $next_id = $processed_stories_ids->[ -1 ] + 1;
-    }
-
-    say STDERR Dumper( $processed_stories_ids );
-
-    return $processed_stories_ids;
+    return MediaWords::Solr::search_for_processed_stories_ids( $q, $fq, $last_id, $rows );
 }
 
 sub _fetch_list
 {
     my ( $self, $c, $last_id, $table_name, $id_field, $rows ) = @_;
 
-    my $stories_ids = $self->_get_object_ids( $c, $last_id, $rows );
+    $rows //= 20;
+    $rows = List::Util::min( $rows, 10_000 );
 
-    #say STDERR Dumper( $stories_ids );
+    my $ps_ids = $self->_get_object_ids( $c, $last_id, $rows );
 
-    my $query =
-"select stories.*, processed_stories.processed_stories_id from stories natural join processed_stories where processed_stories_id in (??) ORDER by $id_field asc ";
+    return [] unless ( @{ $ps_ids } );
 
-    my @values = @{ $stories_ids };
+    my $db = $c->dbis;
 
-    return [] unless scalar( @values );
+    $db->begin;
 
-    #say STDERR Dumper( [ @values ] );
+    my $ids_table = $db->get_temporary_ids_table( $ps_ids );
 
-    say STDERR $query;
+    my $stories = $db->query( <<END )->hashes;
+with ps_ids as
 
-    my $list = $c->dbis->query( $query, @values )->hashes;
+    ( select processed_stories_id, stories_id 
+        from processed_stories
+        where processed_stories_id in ( select id from $ids_table ) )
 
-    return $list;
+select s.*, p.processed_stories_id
+    from stories s join ps_ids p on ( s.stories_id = p.stories_id )    
+    order by processed_stories_id asc limit $rows
+END
+
+    $db->commit;
+
+    return $stories;
 }
 
 sub put_tags : Local : ActionClass('+MediaWords::Controller::Api::V2::MC_Action_REST')
@@ -334,7 +249,7 @@ sub put_tags_PUT : Local
         $story_tags = [ $story_tag ];
     }
 
-    say STDERR Dumper( $story_tags );
+    # say STDERR Dumper( $story_tags );
 
     $self->_add_tags( $c, $story_tags );
 
