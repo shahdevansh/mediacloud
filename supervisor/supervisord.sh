@@ -4,12 +4,14 @@ PWD="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Determine "childlogdir"
 cd "$PWD/../"
-CHILDLOGDIR=`./script/run_with_carton.sh ./script/mediawords_query_config.pl //supervisor/childlogdir`
+CHILDLOGDIR=`./script/run_with_carton.sh ./script/mediawords_query_config.pl "//supervisor/childlogdir"`
 if [[ -z "$CHILDLOGDIR" ]]; then
     echo "\"childlogdir\" is undefined in the configuration."
     exit 1
 fi
 CHILDLOGDIR="$(cd "$CHILDLOGDIR" && pwd )"
+
+./script/run_with_carton.sh ./script/mediawords_generate_supervisord_conf.pl
 
 cd "supervisor/"
 source "$PWD/supervisor_is_up_to_date.inc.sh"

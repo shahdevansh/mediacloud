@@ -47,6 +47,9 @@ sub print_csv_to_file
 
     my $files;
 
+    my $db = MediaWords::DB::connect_to_db;
+    my ( $now ) = $db->query( "select now()" )->flat;
+
     if ( $num_proc == 1 )
     {
         _print_csv_to_file_single_job( $file_spec, 1, 1, $delta );
@@ -72,8 +75,8 @@ sub print_csv_to_file
         $pm->wait_all_children;
     }
 
-    my $db = MediaWords::DB::connect_to_db;
-    $db->query( "insert into solr_imports( import_date, full_import ) values ( now(), ? )", ( $delta ? 'f' : 't' ) );
+    my $full_import = $delta ? 'f' : 't';
+    $db->query( "insert into solr_imports( import_date, full_import ) values ( ?, ? )", $now, $full_import );
 
     return $files;
 }
@@ -181,7 +184,6 @@ END
         # cpu is a significant bottleneck for this script
         while ( my $row = $sth->fetchrow_arrayref )
         {
-            print STDERR time . " " . ( $i * $FETCH_BLOCK_SIZE ) . "\n" if ( $i++ );
             my $stories_id         = $row->[ 0 ];
             my $media_id           = $row->[ 1 ];
             my $story_sentences_id = $row->[ 3 ];
@@ -198,6 +200,7 @@ END
                 $ss_tags_list );
             print FILE encode( 'utf8', $csv->string . "\n" );
         }
+        print STDERR time . " " . ( $i * $FETCH_BLOCK_SIZE ) . "\n" if ( $i++ );
     }
 
     $dbh->do( "close csr" );
