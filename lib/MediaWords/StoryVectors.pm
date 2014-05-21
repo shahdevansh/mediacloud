@@ -11,9 +11,10 @@ use Data::Dumper;
 
 use MediaWords::Languages::Language;
 use MediaWords::DBI::Stories;
-use MediaWords::Util::SQL;
 use MediaWords::Util::Countries;
+use MediaWords::Util::HTML;
 use MediaWords::Util::IdentifyLanguage;
+use MediaWords::Util::SQL;
 
 use Date::Format;
 use Date::Parse;
@@ -458,6 +459,11 @@ sub update_story_sentence_words_and_language
 
     # Get story text
     my $story_text = $story->{ story_text } || MediaWords::DBI::Stories::get_text_for_word_counts( $db, $story );
+
+    if ( length( $story_text ) < length( $story->{ description } ) )
+    {
+        $story_text = html_strip( "$story->{ title }.  $story->{ description }." );
+    }
 
     # Determine TLD
     my $story_tld = '';

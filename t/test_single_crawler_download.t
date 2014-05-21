@@ -67,9 +67,10 @@ sub add_test_feed
     return $feed;
 }
 
-Readonly my $crawler_timeout => 60;
+Readonly my $crawler_timeout => 2 * 60;
 
-# run the crawler for one minute, which should be enough time to gather all of the stories from the test feed
+# run the crawler for two minutes, which should be enough time to gather all of
+# the stories from the test feed and test-extract them
 sub run_crawler
 {
 
@@ -89,50 +90,6 @@ sub run_crawler
     print "crawler exiting ...\n";
 }
 
-sub extract_downloads
-{
-    my ( $db ) = @_;
-
-    print "extracting downloads ...\n";
-
-    my $downloads = $db->query( "select * from downloads where type = 'content'" )->hashes;
-
-    for my $download ( @{ $downloads } )
-    {
-        MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, 1 );
-    }
-}
-
-sub update_download_texts
-{
-    my ( $db ) = @_;
-
-    my $download_texts = $db->query( "select * from download_texts" )->hashes;
-
-    for my $download_text ( @{ $download_texts } )
-    {
-        MediaWords::DBI::DownloadTexts::update_text( $db, $download_text );
-    }
-}
-
-# run extractor, tagger, and vector on all stories
-sub process_stories
-{
-    my ( $db ) = @_;
-
-    print "processing stories ...\n";
-
-    my $stories = $db->query( "select * from stories" )->hashes;
-
-    for my $story ( @{ $stories } )
-    {
-        print "adding default tags ...\n";
-        MediaWords::DBI::Stories::add_default_tags( $db, $story );
-    }
-
-    print "processing stories done.\n";
-}
-
 # get stories from database, including content, text, tags, sentences, sentence_words, and story_sentence_words
 sub get_expanded_stories
 {
@@ -147,9 +104,6 @@ sub get_expanded_stories
         $story->{ content } = ${ MediaWords::DBI::Stories::fetch_content( $db, $story ) };
         $story->{ extracted_text } = MediaWords::DBI::Stories::get_text( $db, $story );
         $story->{ tags } = MediaWords::DBI::Stories::get_db_module_tags( $db, $story, 'NYTTopics' );
-
-        $story->{ story_sentence_words } =
-          $db->query( "select * from story_sentence_words where stories_id = ?", $story->{ stories_id } )->hashes;
 
         $story->{ story_sentences } =
           $db->query( "select * from story_sentences where stories_id = ? order by stories_id, sentence_number ",
@@ -180,16 +134,6 @@ sub _purge_stories_id_field
         $sentence->{ stories_id } = '';
         delete $sentence->{ stories_id };
     }
-}
-
-# print human readable version of ssw, sorted by count
-sub print_ssw
-{
-    my ( $label, $story_sentence_words ) = @_;
-
-    my $ssw_sorted = [ sort { $a->{ stem_count } <=> $b->{ stem_count } } @{ $story_sentence_words } ];
-
-    map { print STDERR "$label: $_->{ stem } [ $_->{ term } ] - $_->{ stem_count }\n" } @{ $ssw_sorted };
 }
 
 # test various results of the crawler
@@ -253,20 +197,6 @@ sub test_stories
                 $test_story->{ story_sentences },
                 "story sentences " . $story->{ stories_id }
             );
-
-          TODO:
-            {
-                my $fake_var;    #silence warnings
-
-                my $test_story_sentence_words_count = scalar( @{ $test_story->{ story_sentence_words } } );
-                my $story_sentence_words_count      = scalar( @{ $story->{ story_sentence_words } } );
-
-                is(
-                    $story_sentence_words_count,
-                    $test_story_sentence_words_count,
-                    "story words count for " . $story->{ stories_id }
-                );
-            }
         }
 
         delete( $test_story_hash->{ $story->{ title } } );
@@ -429,6 +359,8 @@ sub main
 
             my $feed_download = MediaWords::Test::DB::create_download_for_feed( $feed, $db );
 
+            MediaWords::Util::Config::get_config->{ mediawords }->{ extract_in_process } = 1;
+
             my $crawler = MediaWords::Crawler::Engine->new();
 
             $crawler->processes( 1 );
@@ -451,15 +383,14 @@ sub main
 
             $crawler->crawl_single_download( $content_download->{ downloads_id } );
 
-            extract_downloads( $db );
-
-            process_stories( $db );
-
             if ( defined( $dump ) && ( $dump eq '-d' ) )
             {
                 die( "Dumping of stories is only supported within t/test_crawler.t \n" .
                       "test_crawler.t and test_single_crawler_download.t share data" );
             }
+
+            # Wait for a bit for the crawler to finish crawling
+            sleep( 10 );
 
             test_stories( $db, $feed );
 

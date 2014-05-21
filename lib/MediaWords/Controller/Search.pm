@@ -9,6 +9,7 @@ use base 'Catalyst::Controller';
 
 use MediaWords::Solr;
 use MediaWords::Util::CSV;
+use MediaWords::ActionRole::Logged;
 
 =head1 NAME>
 
@@ -99,7 +100,7 @@ END
 }
 
 # search for stories using solr and return either a sampled list of stories in html or the full list in csv
-sub index : Path : Args(0)
+sub index : Path : Args(0) : Does('~Throttled') : Does('~Logged')
 {
     my ( $self, $c ) = @_;
 
@@ -118,7 +119,11 @@ sub index : Path : Args(0)
     my $csv = $c->req->params->{ csv };
 
     my $solr_params = { q => $q };
-    if ( !$csv )
+    if ( $csv )
+    {
+        $solr_params->{ rows } = 100_000;
+    }
+    else
     {
         $solr_params->{ sort } = 'random_1 asc';
         $solr_params->{ rows } = 100;
@@ -149,6 +154,9 @@ sub index : Path : Args(0)
         $c->response->content_type( 'text/csv; charset=UTF-8' );
         $c->response->content_length( bytes::length( $encoded_csv ) );
         $c->response->body( $encoded_csv );
+
+        MediaWords::ActionRole::Logged::set_requested_items_count( $c, $num_stories + 1 )
+          ;    # number of stories + the request itself
     }
     else
     {
@@ -161,7 +169,7 @@ sub index : Path : Args(0)
 }
 
 # print word cloud of search results
-sub wc : Local
+sub wc : Local : Does('~Throttled') : Does('~Logged')
 {
     my ( $self, $c ) = @_;
 

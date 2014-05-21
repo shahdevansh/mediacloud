@@ -1064,6 +1064,25 @@ END
     return $all_sentences;
 }
 
+# Mark the story as processed by INSERTing an entry into "processed_stories";
+# return true on success, false on failure
+sub mark_as_processed($$)
+{
+    my ( $db, $stories_id ) = @_;
+
+    my $result;
+    eval { $result = $db->create( 'processed_stories', { stories_id => $stories_id } ); };
+    if ( $@ or ( !$result ) )
+    {
+        say STDERR "Unable to insert story ID $stories_id into 'processed_stories': $@";
+        return 0;
+    }
+    else
+    {
+        return 1;
+    }
+}
+
 # given two lists of hashes, $stories and $story_data, each with
 # a stories_id field in each row, assign each key:value pair in
 # story_data to the corresponding row in $stories.  if $list_field
@@ -1073,6 +1092,8 @@ END
 sub attach_story_data_to_stories
 {
     my ( $stories, $story_data, $list_field ) = @_;
+
+    map { $_->{ $list_field } = [] } @{ $stories } if ( $list_field );
 
     return unless ( @{ $story_data } );
 

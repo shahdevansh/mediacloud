@@ -58,13 +58,13 @@ sub run($;$)
 {
     my ( $self, $args ) = @_;
 
+    my $db = MediaWords::DB::connect_to_db();
+
     my $media_id = $args->{ media_id };
     unless ( defined $media_id )
     {
         die "'media_id' is undefined.";
     }
-
-    my $db = MediaWords::DB::connect_to_db();
 
     $db->begin_work;
 
@@ -87,7 +87,17 @@ sub run($;$)
             feed_status => $need_to_moderate ? 'inactive' : 'active',
         };
 
-        eval { $db->create( 'feeds', $feed ); };
+        my $existing_feed = $db->query( <<END, $feed_link->{ url }, $medium->{ media_id } )->hash;
+select * from feeds where url = ? and media_id = ?
+END
+        if ( $existing_feed )
+        {
+            $db->update_by_id( 'feeds', $existing_feed->{ feeds_id }, $feed );
+        }
+        else
+        {
+            eval { $db->create( 'feeds', $feed ); };
+        }
 
         if ( $@ )
         {
@@ -120,8 +130,6 @@ sub run($;$)
     );
 
     $db->commit;
-
-    $db->disconnect;
 }
 
 no Moose;    # gets rid of scaffolding
