@@ -18,7 +18,6 @@ use Date::Parse;
 use DateTime;
 use Encode;
 use FindBin;
-use IO::Compress::Gzip;
 use URI::Split;
 use if $] < 5.014, Switch => 'Perl6';
 use if $] >= 5.014, feature => 'switch';
@@ -35,6 +34,7 @@ use MediaWords::DBI::Stories;
 use MediaWords::Util::Config;
 use MediaWords::DBI::Stories;
 use MediaWords::Crawler::FeedHandler;
+use MediaWords::GearmanFunction::ExtractAndVector;
 
 # CONSTANTS
 
@@ -169,7 +169,6 @@ sub _restrict_content_type
         return;
     }
 
-    print "unsupported content type: " . $response->content_type . "\n";
     $response->content( '(unsupported content type)' );
 }
 
@@ -263,7 +262,44 @@ END
     set_use_pager( $dbs, $medium, $next_page_url );
 }
 
-sub _queue_author_extraction
+sub _queue_extraction($$)
+{
+    my ( $self, $download ) = @_;
+
+    my $db             = $self->engine->dbs;
+    my $fetcher_number = $self->engine->fetcher_number;
+
+    say STDERR "fetcher $fetcher_number starting extraction for download " . $download->{ downloads_id };
+
+    if ( MediaWords::Util::Config::get_config->{ mediawords }->{ extract_in_process } )
+    {
+        say STDERR "extracting in process...";
+        MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, $fetcher_number );
+    }
+    else
+    {
+        while ( 1 )
+        {
+            eval {
+                MediaWords::GearmanFunction::ExtractAndVector->enqueue_on_gearman(
+                    { downloads_id => $download->{ downloads_id } } );
+            };
+
+            if ( $@ )
+            {
+                warn( "extractor job queue failed.  sleeping and trying again in 5 seconds: $@" );
+                sleep 5;
+            }
+            else
+            {
+                last;
+            }
+        }
+        say STDERR "queued extraction";
+    }
+}
+
+sub _queue_author_extraction($$;$)
 {
     my ( $self, $download, $response ) = @_;
 
@@ -296,8 +332,6 @@ sub _queue_author_extraction
     }
 
     say STDERR "queued story extraction";
-
-    return;
 }
 
 # call the content module to parse the text from the html and add pending downloads
@@ -309,6 +343,8 @@ sub _process_content
     say STDERR "fetcher " . $self->engine->fetcher_number . " starting _process_content for  " . $download->{ downloads_id };
 
     $self->call_pager( $dbs, $download, $response->decoded_content );
+
+    $self->_queue_extraction( $download );
 
     $self->_queue_author_extraction( $download );
 

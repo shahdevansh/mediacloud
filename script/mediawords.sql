@@ -69,7 +69,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4448;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4456;
     
 BEGIN
 
@@ -333,6 +333,10 @@ create table media (
     is_not_dup          boolean         null,
     use_pager           boolean         null,
     unpaged_stories     int             not null default 0,
+
+    -- Annotate stories from this media source with CoreNLP?
+    annotate_with_corenlp   BOOLEAN     NOT NULL DEFAULT(false),
+
     CONSTRAINT media_name_not_empty CHECK ( ( (name)::text <> ''::text ) ),
     CONSTRAINT media_self_dup CHECK ( dup_media_id IS NULL OR dup_media_id <> media_id )
 );
@@ -420,6 +424,10 @@ create index feeds_last_successful_download_time on feeds(last_successful_downlo
 create table tag_sets (
     tag_sets_id            serial            primary key,
     name                varchar(512)    not null,
+    label               varchar(512),
+    description         text,
+    show_on_media       boolean,
+    show_on_stories     boolean,
     CONSTRAINT tag_sets_name_not_empty CHECK (((name)::text <> ''::text))
 );
 
@@ -429,6 +437,10 @@ create table tags (
     tags_id                serial            primary key,
     tag_sets_id            int                not null references tag_sets,
     tag                    varchar(512)    not null,
+    label                  varchar(512),
+    description            text,
+    show_on_media          boolean,
+    show_on_stories        boolean,
         CONSTRAINT no_line_feed CHECK (((NOT ((tag)::text ~~ '%
 %'::text)) AND (NOT ((tag)::text ~~ '%
 %'::text)))),
@@ -937,10 +949,10 @@ CREATE VIEW downloads_sites as select site_from_host( host ) as site, * from dow
 --
 CREATE TABLE raw_downloads (
     raw_downloads_id    SERIAL      PRIMARY KEY,
-    downloads_id        INTEGER     NOT NULL REFERENCES downloads ON DELETE CASCADE,
+    object_id           INTEGER     NOT NULL REFERENCES downloads ON DELETE CASCADE,
     raw_data            BYTEA       NOT NULL
 );
-CREATE UNIQUE INDEX raw_downloads_downloads_id ON raw_downloads (downloads_id);
+CREATE UNIQUE INDEX raw_downloads_object_id ON raw_downloads (object_id);
 
 
 create table feeds_stories_map
@@ -2064,6 +2076,18 @@ CREATE TABLE auth_users (
     last_unsuccessful_login_attempt     TIMESTAMP NOT NULL DEFAULT TIMESTAMP 'epoch'
 );
 
+create index auth_users_email on auth_users( email );
+create index auth_users_token on auth_users( api_token );
+
+create table auth_user_ip_tokens (
+    auth_user_ip_tokens_id  serial      primary key,
+    auth_users_id           int         not null references auth_users on delete cascade,
+    api_token               varchar(64) unique not null default generate_api_token() constraint api_token_64_characters check( length( api_token ) = 64 ),
+    ip_address              inet    not null
+);
+
+create index auth_user_ip_tokens_token on auth_user_ip_tokens ( api_token, ip_address );
+
 -- List of roles the users can perform
 CREATE TABLE auth_roles (
     auth_roles_id   SERIAL  PRIMARY KEY,
@@ -2093,6 +2117,155 @@ INSERT INTO auth_roles (role, description) VALUES
     ('cm', 'Controversy mapper; includes media and story editing'),
     ('stories-api', 'Access to the stories api'),
     ('search', 'Access to the /search pages');
+
+--
+-- User requests (the ones that are configured to be logged)
+--
+CREATE TABLE auth_user_requests (
+
+    auth_user_requests_id   SERIAL          PRIMARY KEY,
+
+    -- User's email (does *not* reference auth_users.email because the user
+    -- might be deleted)
+    email                   TEXT            NOT NULL,
+
+    -- Request path (e.g. "api/v2/stories/list")
+    request_path            TEXT            NOT NULL,
+
+    -- When did the request happen?
+    request_timestamp       TIMESTAMP       NOT NULL DEFAULT LOCALTIMESTAMP,
+
+    -- Number of "items" requested in a request
+    -- For example:
+    -- * a single request to "/api/v2/stories/list" would count as one item;
+    -- * a single request to "/search" would count as a single request plus the
+    --   number of stories if "csv=1" is specified, or just as a single request
+    --   if "csv=1" is not specified
+    requested_items_count   INTEGER         NOT NULL DEFAULT 1
+
+);
+
+CREATE INDEX auth_user_requests_email ON auth_user_requests (email);
+CREATE INDEX auth_user_requests_request_path ON auth_user_requests (request_path);
+
+
+--
+-- User request daily counts
+--
+CREATE TABLE auth_user_request_daily_counts (
+
+    auth_user_request_daily_counts_id  SERIAL  PRIMARY KEY,
+
+    -- User's email (does *not* reference auth_users.email because the user
+    -- might be deleted)
+    email                   TEXT    NOT NULL,
+
+    -- Day (request timestamp, date_truncated to a day)
+    day                     DATE    NOT NULL,
+
+    -- Number of requests
+    requests_count          INTEGER NOT NULL,
+
+    -- Number of requested items
+    requested_items_count   INTEGER NOT NULL
+
+);
+
+CREATE INDEX auth_user_request_daily_counts_email ON auth_user_request_daily_counts (email);
+CREATE INDEX auth_user_request_daily_counts_day ON auth_user_request_daily_counts (day);
+
+
+-- On each logged request, update "auth_user_request_daily_counts" table
+CREATE OR REPLACE FUNCTION auth_user_requests_update_daily_counts() RETURNS trigger AS
+$$
+
+DECLARE
+    request_date DATE;
+
+BEGIN
+
+    request_date := DATE_TRUNC('day', NEW.request_timestamp)::DATE;
+
+    -- Try to UPDATE a previously INSERTed day
+    UPDATE auth_user_request_daily_counts
+    SET requests_count = requests_count + 1,
+        requested_items_count = requested_items_count + NEW.requested_items_count
+    WHERE email = NEW.email
+      AND day = request_date;
+
+    IF FOUND THEN
+        RETURN NULL;
+    END IF;
+
+    -- If UPDATE was not successful, do an INSERT (new day!)
+    INSERT INTO auth_user_request_daily_counts (email, day, requests_count, requested_items_count)
+    VALUES (NEW.email, request_date, 1, NEW.requested_items_count);
+
+    RETURN NULL;
+
+END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE TRIGGER auth_user_requests_update_daily_counts
+    AFTER INSERT ON auth_user_requests
+    FOR EACH ROW EXECUTE PROCEDURE auth_user_requests_update_daily_counts();
+
+-- User limits for logged + throttled controller actions
+CREATE TABLE auth_user_limits (
+
+    auth_user_limits_id             SERIAL      NOT NULL,
+
+    auth_users_id                   INTEGER     NOT NULL UNIQUE REFERENCES auth_users(auth_users_id)
+                                                ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE,
+
+    -- Request limit (0 or belonging to 'admin' / 'admin-readonly' group = no
+    -- limit)
+    weekly_requests_limit           INTEGER     NOT NULL DEFAULT 1000,
+
+    -- Requested items (stories) limit (0 or belonging to 'admin' /
+    -- 'admin-readonly' group = no limit)
+    weekly_requested_items_limit    INTEGER     NOT NULL DEFAULT 20000
+
+);
+
+CREATE UNIQUE INDEX auth_user_limits_auth_users_id ON auth_user_limits (auth_users_id);
+
+-- Set the default limits for newly created users
+CREATE OR REPLACE FUNCTION auth_users_set_default_limits() RETURNS trigger AS
+$$
+BEGIN
+
+    INSERT INTO auth_user_limits (auth_users_id) VALUES (NEW.auth_users_id);
+    RETURN NULL;
+
+END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE TRIGGER auth_users_set_default_limits
+    AFTER INSERT ON auth_users
+    FOR EACH ROW EXECUTE PROCEDURE auth_users_set_default_limits();
+
+
+-- Add helper function to find out weekly request / request items usage for a user
+CREATE OR REPLACE FUNCTION auth_user_limits_weekly_usage(user_email TEXT)
+RETURNS TABLE(email TEXT, weekly_requests_sum BIGINT, weekly_requested_items_sum BIGINT) AS
+$$
+
+    SELECT auth_users.email,
+           COALESCE(SUM(auth_user_request_daily_counts.requests_count), 0) AS weekly_requests_sum,
+           COALESCE(SUM(auth_user_request_daily_counts.requested_items_count), 0) AS weekly_requested_items_sum
+    FROM auth_users
+        LEFT JOIN auth_user_request_daily_counts
+            ON auth_users.email = auth_user_request_daily_counts.email
+            AND auth_user_request_daily_counts.day > DATE_TRUNC('day', NOW())::date - INTERVAL '1 week'
+    WHERE auth_users.email = $1
+    GROUP BY auth_users.email;
+
+$$
+LANGUAGE SQL;
+
 
 --
 -- Activity log
@@ -2270,3 +2443,43 @@ $$ LANGUAGE PLPGSQL;
 CREATE TRIGGER gearman_job_queue_sync_lastmod
     BEFORE UPDATE ON gearman_job_queue
     FOR EACH ROW EXECUTE PROCEDURE gearman_job_queue_sync_lastmod();
+
+
+--
+-- Returns true if the story can + should be annotated with CoreNLP
+--
+CREATE OR REPLACE FUNCTION story_is_annotatable_with_corenlp(corenlp_stories_id INT) RETURNS boolean AS $$
+BEGIN
+
+    IF EXISTS (
+
+        SELECT 1
+        FROM stories
+            INNER JOIN media ON stories.media_id = media.media_id
+        WHERE stories.stories_id = corenlp_stories_id
+
+          -- We don't check if the story has been extracted here because the
+          -- CoreNLP worker might get to it sooner than the extractor (i.e. the
+          -- extractor might not be fast enough to set extracted = 't' before
+          -- CoreNLP annotation begins)
+
+          -- Media is marked for CoreNLP annotation
+          AND media.annotate_with_corenlp = 't'
+
+          -- Story not yet marked as "processed"
+          AND NOT EXISTS (
+            SELECT 1
+            FROM processed_stories
+            WHERE stories.stories_id = processed_stories.stories_id
+          )
+
+    ) THEN
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+    
+END;
+$$
+LANGUAGE 'plpgsql';
+

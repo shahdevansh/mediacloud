@@ -24,7 +24,7 @@ use URI::Escape;
 use Data::Dumper;
 
 # Validate a password / password token with Crypt::SaltedHash; return 1 on success, 0 on error
-sub _password_hash_is_valid($$)
+sub password_hash_is_valid($$)
 {
     my ( $secret_hash, $secret ) = @_;
 
@@ -87,7 +87,7 @@ sub generate_secure_hash($)
         die "Unable to hash a secret.";
         return '';
     }
-    if ( !_password_hash_is_valid( $secret_hash, $secret ) )
+    if ( !password_hash_is_valid( $secret_hash, $secret ) )
     {
         say STDERR "Secret hash has been generated, but it does not validate.";
         return '';
@@ -150,19 +150,26 @@ sub user_info($$)
     # Fetch readonly information about the user
     my $userinfo = $db->query(
         <<"EOF",
-        SELECT auth_users_id,
-               email,
+        SELECT auth_users.auth_users_id,
+               auth_users.email,
                full_name,
                api_token,
                notes,
-               active
+               active,
+               weekly_requests_sum,
+               weekly_requested_items_sum,
+               weekly_requests_limit,
+               weekly_requested_items_limit
         FROM auth_users
-        WHERE email = ?
+            INNER JOIN auth_user_limits
+                ON auth_users.auth_users_id = auth_user_limits.auth_users_id,
+            auth_user_limits_weekly_usage( \$1 )
+        WHERE auth_users.email = \$1
         LIMIT 1
 EOF
         $email
     )->hash;
-    if ( !( ref( $userinfo ) eq 'HASH' and $userinfo->{ auth_users_id } ) )
+    unless ( ref( $userinfo ) eq ref( {} ) and $userinfo->{ auth_users_id } )
     {
         return 0;
     }
@@ -233,7 +240,7 @@ EOF
         $email
     )->hash;
 
-    if ( !( ref( $user ) eq 'HASH' and $user->{ auth_users_id } ) )
+    unless ( ref( $user ) eq ref( {} ) and $user->{ auth_users_id } )
     {
         return 0;
     }
@@ -244,31 +251,55 @@ EOF
     return $user;
 }
 
+# get the ip address of the given catalyst request, using the x-forwarded-for header
+# if present and ip address is localhost
+sub get_request_ip_address ($)
+{
+    my ( $c ) = @_;
+
+    my $req = $c->req;
+
+    my $forwarded_ip = $req->headers->header( 'X-Forwarded-For' );
+    return $forwarded_ip if ( $forwarded_ip && ( $req->address eq '127.0.0.1' ) );
+
+    return $req->address;
+}
+
 # Fetch a hash of basic user information and an array of assigned roles based on the API token.
 # Only active users are fetched.
 # Returns 0 on error
 sub user_for_api_token($$)
 {
-    my ( $db, $api_token ) = @_;
+    my ( $c, $api_token ) = @_;
+
+    my $db         = $c->dbis;
+    my $ip_address = get_request_ip_address( $c );
 
     my $user = $db->query(
         <<"EOF",
         SELECT auth_users.auth_users_id,
                auth_users.email,
                ARRAY_TO_STRING(ARRAY_AGG(role), ' ') AS roles
-        FROM auth_users
+        FROM auth_users 
             LEFT JOIN auth_users_roles_map
                 ON auth_users.auth_users_id = auth_users_roles_map.auth_users_id
             LEFT JOIN auth_roles
                 ON auth_users_roles_map.auth_roles_id = auth_roles.auth_roles_id
-        WHERE auth_users.api_token = LOWER(?)
+        WHERE auth_users.api_token = LOWER(\$1) OR
+            LOWER(\$1) in ( 
+                SELECT api_token
+                    FROM auth_user_ip_tokens
+                    WHERE
+                        auth_users.auth_users_id = auth_user_ip_tokens.auth_users_id AND
+                        ip_address = \$2 )
           AND active = true
         GROUP BY auth_users.auth_users_id,
                  auth_users.email
         ORDER BY auth_users.auth_users_id
         LIMIT 1
 EOF
-        $api_token
+        $api_token,
+        $ip_address
     )->hash;
 
     if ( !( ref( $user ) eq 'HASH' and $user->{ auth_users_id } ) )
@@ -287,10 +318,9 @@ sub user_for_api_token_catalyst($)
 {
     my $c = shift;
 
-    my $dbis      = $c->dbis;
     my $api_token = $c->request->param( API_TOKEN_PARAMETER . '' );
 
-    return user_for_api_token( $dbis, $api_token );
+    return user_for_api_token( $c, $api_token );
 }
 
 # Post-successful login database tasks
@@ -371,7 +401,7 @@ EOF
 
     $password_reset_token_hash = $password_reset_token_hash->{ password_reset_token_hash };
 
-    if ( _password_hash_is_valid( $password_reset_token_hash, $password_reset_token ) )
+    if ( password_hash_is_valid( $password_reset_token_hash, $password_reset_token ) )
     {
         return 1;
     }
@@ -505,7 +535,7 @@ EOF
     $db_password_old = $db_password_old->{ password_hash };
 
     # Validate the password
-    if ( !_password_hash_is_valid( $db_password_old, $password_old ) )
+    if ( !password_hash_is_valid( $db_password_old, $password_old ) )
     {
         return 'Old password is incorrect.';
     }
@@ -610,12 +640,16 @@ EOF
 }
 
 # Add new user; $role_ids is a arrayref to an array of role IDs; returns error message on error, empty string on success
-sub add_user_or_return_error_message($$$$$$$$)
+sub add_user_or_return_error_message($$$$$$$$;$$)
 {
-    my ( $db, $email, $full_name, $notes, $role_ids, $is_active, $password, $password_repeat ) = @_;
+    my ( $db, $email, $full_name, $notes, $role_ids, $is_active, $password, $password_repeat, $weekly_requests_limit,
+        $weekly_requested_items_limit )
+      = @_;
 
-    say STDERR "Creating user with email: $email, full name: $full_name, notes: $notes, role IDs: " . Dumper( $role_ids ) .
-      ", is active: $is_active";
+    say STDERR "Creating user with email: $email, full name: $full_name, notes: $notes, role IDs: " .
+      Dumper( $role_ids ) . ", is active: $is_active, weekly_requests_limit: " .
+      ( defined $weekly_requests_limit ? $weekly_requests_limit : 'default' ) . ', weekly requested items limit: ' .
+      ( defined $weekly_requested_items_limit ? $weekly_requested_items_limit : 'default' );
 
     my $password_validation_message =
       validate_password_requirements_or_return_error_message( $email, $password, $password_repeat );
@@ -674,6 +708,31 @@ EOF
     }
     $sth->finish;
 
+    # Update limits (if they're defined)
+    if ( defined $weekly_requests_limit )
+    {
+        $db->query(
+            <<EOF,
+            UPDATE auth_user_limits
+            SET weekly_requests_limit = ?
+            WHERE auth_users_id = ?
+EOF
+            $weekly_requests_limit, $auth_users_id
+        );
+    }
+
+    if ( defined $weekly_requested_items_limit )
+    {
+        $db->query(
+            <<EOF,
+            UPDATE auth_user_limits
+            SET weekly_requested_items_limit = ?
+            WHERE auth_users_id = ?
+EOF
+            $weekly_requested_items_limit, $auth_users_id
+        );
+    }
+
     # End transaction
     $db->dbh->commit;
 
@@ -683,9 +742,11 @@ EOF
 
 # Update an existing user; returns error message on error, empty string on success
 # ($password and $password_repeat are optional; if not provided, the password will not be changed)
-sub update_user_or_return_error_message($$$$$$;$$)
+sub update_user_or_return_error_message($$$$$$;$$$$)
 {
-    my ( $db, $email, $full_name, $notes, $roles, $is_active, $password, $password_repeat ) = @_;
+    my ( $db, $email, $full_name, $notes, $roles, $is_active, $password, $password_repeat, $weekly_requests_limit,
+        $weekly_requested_items_limit )
+      = @_;
 
     # Check if user exists
     my $userinfo = user_info( $db, $email );
@@ -718,6 +779,30 @@ EOF
             $db->dbh->rollback;
             return $password_change_error_message;
         }
+    }
+
+    if ( defined $weekly_requests_limit )
+    {
+        $db->query(
+            <<EOF,
+            UPDATE auth_user_limits
+            SET weekly_requests_limit = ?
+            WHERE auth_users_id = ?
+EOF
+            $weekly_requests_limit, $userinfo->{ auth_users_id }
+        );
+    }
+
+    if ( defined $weekly_requested_items_limit )
+    {
+        $db->query(
+            <<EOF,
+            UPDATE auth_user_limits
+            SET weekly_requested_items_limit = ?
+            WHERE auth_users_id = ?
+EOF
+            $weekly_requested_items_limit, $userinfo->{ auth_users_id }
+        );
     }
 
     # Update roles
@@ -897,6 +982,57 @@ EOF
 
     # Success
     return '';
+}
+
+# Get default weekly request limit
+sub default_weekly_requests_limit($)
+{
+    my $db = shift;
+
+    my $default_weekly_requests_limit = $db->query(
+        <<EOF
+        SELECT column_default AS default_weekly_requests_limit
+        FROM information_schema.columns
+        WHERE (table_schema, table_name) = ('public', 'auth_user_limits')
+          AND column_name = 'weekly_requests_limit'
+EOF
+    )->hash;
+    unless ( ref( $default_weekly_requests_limit ) eq ref( {} )
+        and defined( $default_weekly_requests_limit->{ default_weekly_requests_limit } ) )
+    {
+        die "Unable to fetch default weekly requests limit.";
+    }
+
+    return $default_weekly_requests_limit->{ default_weekly_requests_limit } + 0;
+}
+
+# Get default weekly requested items limit
+sub default_weekly_requested_items_limit($)
+{
+    my $db = shift;
+
+    my $default_weekly_requested_items_limit = $db->query(
+        <<EOF
+        SELECT column_default AS default_weekly_requested_items_limit
+        FROM information_schema.columns
+        WHERE (table_schema, table_name) = ('public', 'auth_user_limits')
+          AND column_name = 'weekly_requested_items_limit'
+EOF
+    )->hash;
+    unless ( ref( $default_weekly_requested_items_limit ) eq ref( {} )
+        and defined( $default_weekly_requested_items_limit->{ default_weekly_requested_items_limit } ) )
+    {
+        die "Unable to fetch default weekly requested items limit.";
+    }
+
+    return $default_weekly_requested_items_limit->{ default_weekly_requested_items_limit } + 0;
+}
+
+# User roles that are not limited by the weekly requests / requested items limits
+sub roles_exempt_from_user_limits()
+{
+    my @exceptions = qw/admin admin-reaonly/;
+    return \@exceptions;
 }
 
 1;
