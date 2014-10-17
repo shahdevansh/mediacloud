@@ -64,7 +64,7 @@ $$
 LANGUAGE plpgsql;
 
 -- Implicitly DROP function before recreating it
-DROP FUNCTION num_controversy_stories_without_bitly_statistics;
+DROP FUNCTION num_controversy_stories_without_bitly_statistics(param_controversies_id INT);
 CREATE FUNCTION num_controversy_stories_without_bitly_statistics(param_controversies_id INT) RETURNS INT AS
 $$
 DECLARE
