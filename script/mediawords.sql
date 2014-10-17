@@ -45,7 +45,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4473;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4474;
     
 BEGIN
 
@@ -1765,37 +1765,37 @@ create index stories_id on cd.stories ( controversy_dumps_id, stories_id );
 
 
 -- Bit.ly stats for stories
-CREATE TABLE story_bitly_statistics (
-    story_bitly_statistics_id   SERIAL  PRIMARY KEY,
+CREATE TABLE bitly_story_statistics (
+    bitly_story_statistics_id   SERIAL  PRIMARY KEY,
     stories_id                  INT     NOT NULL UNIQUE REFERENCES stories ON DELETE CASCADE,
 
-    -- Bit.ly stats
-    bitly_click_count           INT     NOT NULL,
-    bitly_referrer_count        INT     NOT NULL
+    -- Stats
+    click_count                 INT     NOT NULL,
+    referrer_count              INT     NOT NULL
 );
-CREATE UNIQUE INDEX story_bitly_statistics_stories_id
-    ON story_bitly_statistics ( stories_id );
+CREATE UNIQUE INDEX bitly_story_statistics_stories_id
+    ON bitly_story_statistics ( stories_id );
 
 -- Helper to INSERT / UPDATE story's Bit.ly statistics
-CREATE FUNCTION upsert_story_bitly_statistics (
+CREATE FUNCTION upsert_bitly_story_statistics (
     param_stories_id INT,
-    param_bitly_click_count INT,
-    param_bitly_referrer_count INT
+    param_click_count INT,
+    param_referrer_count INT
 ) RETURNS VOID AS
 $$
 BEGIN
     LOOP
         -- Try UPDATing
-        UPDATE story_bitly_statistics
-            SET bitly_click_count = param_bitly_click_count,
-                bitly_referrer_count = param_bitly_referrer_count
+        UPDATE bitly_story_statistics
+            SET click_count = param_click_count,
+                referrer_count = param_referrer_count
             WHERE stories_id = param_stories_id;
         IF FOUND THEN RETURN; END IF;
 
         -- Nothing to UPDATE, try to INSERT a new record
         BEGIN
-            INSERT INTO story_bitly_statistics (stories_id, bitly_click_count, bitly_referrer_count)
-            VALUES (param_stories_id, param_bitly_click_count, param_bitly_referrer_count);
+            INSERT INTO bitly_story_statistics (stories_id, click_count, referrer_count)
+            VALUES (param_stories_id, param_click_count, param_referrer_count);
             RETURN;
         EXCEPTION WHEN UNIQUE_VIOLATION THEN
             -- If someone else INSERTs the same key concurrently,
@@ -1829,7 +1829,7 @@ BEGIN
     WHERE controversies_id = param_controversies_id
       AND stories_id NOT IN (
         SELECT stories_id
-        FROM story_bitly_statistics
+        FROM bitly_story_statistics
     )
     GROUP BY controversies_id;
     IF NOT FOUND THEN
