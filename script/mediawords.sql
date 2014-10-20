@@ -45,7 +45,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4474;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4475;
     
 BEGIN
 
@@ -1764,38 +1764,42 @@ create table cd.stories (
 create index stories_id on cd.stories ( controversy_dumps_id, stories_id );    
 
 
--- Bit.ly stats for stories
-CREATE TABLE bitly_story_statistics (
-    bitly_story_statistics_id   SERIAL  PRIMARY KEY,
-    stories_id                  INT     NOT NULL UNIQUE REFERENCES stories ON DELETE CASCADE,
+-- Bit.ly click statistics for stories, broken down into days (sparse table --
+-- only days for which there are records are stored)
+CREATE TABLE bitly_story_clicks (
+    bitly_story_statistics_id   SERIAL      PRIMARY KEY,
+    stories_id                  INT         NOT NULL REFERENCES stories ON DELETE CASCADE,
 
-    -- Stats
-    click_count                 INT     NOT NULL,
-    referrer_count              INT     NOT NULL
+    -- Day for which the click count is being saved
+    click_date                  DATE        NOT NULL,
+
+    -- Click count
+    click_count                 INT         NOT NULL
 );
-CREATE UNIQUE INDEX bitly_story_statistics_stories_id
-    ON bitly_story_statistics ( stories_id );
+CREATE UNIQUE INDEX bitly_story_clicks_stories_id_date
+    ON bitly_story_clicks ( stories_id, click_date );
 
 -- Helper to INSERT / UPDATE story's Bit.ly statistics
-CREATE FUNCTION upsert_bitly_story_statistics (
+CREATE FUNCTION upsert_bitly_story_clicks (
     param_stories_id INT,
-    param_click_count INT,
-    param_referrer_count INT
+    param_click_date DATE,
+    param_click_count INT
 ) RETURNS VOID AS
 $$
 BEGIN
+
     LOOP
         -- Try UPDATing
-        UPDATE bitly_story_statistics
-            SET click_count = param_click_count,
-                referrer_count = param_referrer_count
-            WHERE stories_id = param_stories_id;
+        UPDATE bitly_story_clicks
+            SET click_count = param_click_count
+            WHERE stories_id = param_stories_id
+              AND click_date = param_click_date;
         IF FOUND THEN RETURN; END IF;
 
         -- Nothing to UPDATE, try to INSERT a new record
         BEGIN
-            INSERT INTO bitly_story_statistics (stories_id, click_count, referrer_count)
-            VALUES (param_stories_id, param_click_count, param_referrer_count);
+            INSERT INTO bitly_story_clicks (stories_id, click_date, click_count)
+            VALUES (param_stories_id, param_click_date, param_click_count);
             RETURN;
         EXCEPTION WHEN UNIQUE_VIOLATION THEN
             -- If someone else INSERTs the same key concurrently,
@@ -1806,6 +1810,57 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
+
+
+-- Bit.ly referrer statistics for stories
+CREATE TABLE bitly_story_referrers (
+    bitly_story_statistics_id   SERIAL      PRIMARY KEY,
+    stories_id                  INT         NOT NULL REFERENCES stories ON DELETE CASCADE,
+
+    -- Day range for which the referrer count is being saved
+    referrer_start_date         DATE        NOT NULL,
+    referrer_end_date           DATE        NOT NULL,
+
+    -- Referrer count
+    referrer_count              INT         NOT NULL
+);
+CREATE UNIQUE INDEX bitly_story_referrers_stories_id_start_date_end_date
+    ON bitly_story_referrers ( stories_id, referrer_start_date, referrer_end_date );
+
+-- Helper to INSERT / UPDATE story's Bit.ly statistics
+CREATE FUNCTION upsert_bitly_story_referrers (
+    param_stories_id INT,
+    param_referrer_start_date DATE,
+    param_referrer_end_date DATE,
+    param_referrer_count INT
+) RETURNS VOID AS
+$$
+BEGIN
+
+    LOOP
+        -- Try UPDATing
+        UPDATE bitly_story_referrers
+            SET referrer_count = param_referrer_count
+            WHERE stories_id = param_stories_id
+              AND referrer_start_date = param_referrer_start_date
+              AND referrer_end_date = param_referrer_end_date;
+        IF FOUND THEN RETURN; END IF;
+
+        -- Nothing to UPDATE, try to INSERT a new record
+        BEGIN
+            INSERT INTO bitly_story_referrers (stories_id, referrer_start_date, referrer_end_date, referrer_count)
+            VALUES (param_stories_id, param_referrer_start_date, param_referrer_end_date, param_referrer_count);
+            RETURN;
+        EXCEPTION WHEN UNIQUE_VIOLATION THEN
+            -- If someone else INSERTs the same key concurrently,
+            -- we will get a unique-key failure. In that case, do
+            -- nothing and loop to try the UPDATE again.
+        END;
+    END LOOP;
+END;
+$$
+LANGUAGE plpgsql;
+
 
 -- Helper to return a number of stories for which we don't have Bit.ly statistics yet
 CREATE FUNCTION num_controversy_stories_without_bitly_statistics (param_controversies_id INT) RETURNS INT AS
@@ -1829,8 +1884,12 @@ BEGIN
     WHERE controversies_id = param_controversies_id
       AND stories_id NOT IN (
         SELECT stories_id
-        FROM bitly_story_statistics
-    )
+        FROM bitly_story_clicks
+      )
+      AND stories_id NOT IN (
+        SELECT stories_id
+        FROM bitly_story_referrers
+      )
     GROUP BY controversies_id;
     IF NOT FOUND THEN
         num_stories_without_bitly_statistics := 0;
