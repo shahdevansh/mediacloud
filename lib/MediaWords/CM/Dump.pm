@@ -398,8 +398,8 @@ create temporary table dump_story_link_counts $_temporary_tablespace as
     select distinct ps.stories_id, 
             coalesce( ilc.inlink_count, 0 ) inlink_count, 
             coalesce( olc.outlink_count, 0 ) outlink_count,
-            bitly_story_clicks.click_count as bitly_click_count,
-            bitly_story_referrers.referrer_count as bitly_referrer_count
+            bsc.click_count as bitly_click_count,
+            bsr.referrer_count as bitly_referrer_count
         from dump_period_stories ps
             left join 
                 ( select cl.ref_stories_id,
@@ -418,15 +418,21 @@ create temporary table dump_story_link_counts $_temporary_tablespace as
                   group by cl.stories_id
                 ) olc on ( ps.stories_id = olc.stories_id )
             left join
-                ( select sum( bitly_story_clicks.click_count ) as click_count
-                  from bitly_story_clicks
+                ( select bitly_story_clicks.stories_id,
+                         sum( bitly_story_clicks.click_count ) as click_count
+                  from bitly_story_clicks,
+                       dump_period_stories ps
                   where bitly_story_clicks.stories_id = ps.stories_id
-                ) as bitly_story_clicks on ps.stories_id = bitly_story_clicks.stories_id
+                  group by bitly_story_clicks.stories_id
+                ) as bsc on ( ps.stories_id = bsc.stories_id )
             left join
-                ( select sum( bitly_story_referrers.referrer_count ) as referrer_count
-                  from bitly_story_referrers
+                ( select bitly_story_referrers.stories_id,
+                         sum( bitly_story_referrers.referrer_count ) as referrer_count
+                  from bitly_story_referrers,
+                       dump_period_stories ps
                   where bitly_story_referrers.stories_id = ps.stories_id
-                ) as bitly_story_referrers on ps.stories_id = bitly_story_referrers.stories_id
+                  group by bitly_story_referrers.stories_id
+                ) as bsr on ( ps.stories_id = bsr.stories_id )
 END
 
     if ( !$is_model )
