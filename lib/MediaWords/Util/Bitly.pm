@@ -152,6 +152,11 @@ sub _unit_reference_ts_and_units_from_start_end_timestamps($$$)
             say STDERR "Delta days between $start_timestamp and $end_timestamp is 0, so setting it to 1";
             $delta_days = 1;
         }
+        else
+        {
+            # Fetch one more day
+            ++$delta_days;
+        }
 
         # Make sure it doesn't exceed Bit.ly's limit
         if ( $delta_days > $max_bitly_limit )
