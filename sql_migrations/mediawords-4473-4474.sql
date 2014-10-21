@@ -25,7 +25,7 @@ DROP TABLE bitly_story_statistics;
 
 -- Bit.ly click statistics for stories, broken down into days (sparse table --
 -- only days for which there are records are stored)
-CREATE TABLE bitly_story_clicks (
+CREATE TABLE bitly_story_daily_clicks (
     bitly_story_statistics_id   SERIAL      PRIMARY KEY,
     stories_id                  INT         NOT NULL REFERENCES stories ON DELETE CASCADE,
 
@@ -35,11 +35,11 @@ CREATE TABLE bitly_story_clicks (
     -- Click count
     click_count                 INT         NOT NULL
 );
-CREATE UNIQUE INDEX bitly_story_clicks_stories_id_date
-    ON bitly_story_clicks ( stories_id, click_date );
+CREATE UNIQUE INDEX bitly_story_daily_clicks_stories_id_date
+    ON bitly_story_daily_clicks ( stories_id, click_date );
 
 -- Date ranges for which Bit.ly click counts have been retrieved
-CREATE VIEW bitly_story_clicks_retrieved AS
+CREATE VIEW bitly_story_clicks AS
     SELECT stories_id,
            MIN(click_date) AS click_start_date,
            MAX(click_date) AS click_end_date,
@@ -55,13 +55,13 @@ CREATE VIEW bitly_story_clicks_retrieved AS
                --    than to form groups.
                click_date - ROW_NUMBER() OVER (PARTITION BY stories_id ORDER BY click_date)::int AS grp
 
-        FROM bitly_story_clicks
-        ) AS bitly_story_clicks_minmax
+        FROM bitly_story_daily_clicks
+        ) AS bitly_story_daily_clicks_aggregated
     GROUP BY stories_id, grp
     ORDER BY stories_id, grp;
 
 -- Helper to INSERT / UPDATE story's Bit.ly statistics
-CREATE FUNCTION upsert_bitly_story_clicks (
+CREATE FUNCTION upsert_bitly_story_daily_clicks (
     param_stories_id INT,
     param_click_date DATE,
     param_click_count INT
@@ -71,7 +71,7 @@ BEGIN
 
     LOOP
         -- Try UPDATing
-        UPDATE bitly_story_clicks
+        UPDATE bitly_story_daily_clicks
             SET click_count = param_click_count
             WHERE stories_id = param_stories_id
               AND click_date = param_click_date;
@@ -79,7 +79,7 @@ BEGIN
 
         -- Nothing to UPDATE, try to INSERT a new record
         BEGIN
-            INSERT INTO bitly_story_clicks (stories_id, click_date, click_count)
+            INSERT INTO bitly_story_daily_clicks (stories_id, click_date, click_count)
             VALUES (param_stories_id, param_click_date, param_click_count);
             RETURN;
         EXCEPTION WHEN UNIQUE_VIOLATION THEN
@@ -164,7 +164,7 @@ BEGIN
     WHERE controversies_id = param_controversies_id
       AND stories_id NOT IN (
         SELECT stories_id
-        FROM bitly_story_clicks
+        FROM bitly_story_daily_clicks
       )
       AND stories_id NOT IN (
         SELECT stories_id
