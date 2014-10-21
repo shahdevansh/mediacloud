@@ -38,6 +38,26 @@ CREATE TABLE bitly_story_clicks (
 CREATE UNIQUE INDEX bitly_story_clicks_stories_id_date
     ON bitly_story_clicks ( stories_id, click_date );
 
+-- Date ranges for which Bit.ly click counts have been retrieved
+CREATE VIEW bitly_story_clicks_retrieved AS
+    SELECT stories_id,
+           MIN(click_date) AS click_start_date,
+           MAX(click_date) AS click_end_date
+    FROM (
+        SELECT stories_id,
+               click_date,
+
+               -- 1. Compute a running, gap-less number in chronological order with the window function row_number()
+               -- 2. Deduct that from the date column in each row (after converting to integer).
+               --    Consecutive days end up with the same date value grp - which has no other purpose or meaning
+               --    than to form groups.
+               click_date - ROW_NUMBER() OVER (PARTITION BY stories_id ORDER BY click_date)::int AS grp
+
+        FROM bitly_story_clicks
+        ) AS bitly_story_clicks_minmax
+    GROUP BY stories_id, grp
+    ORDER BY stories_id, grp;
+
 -- Helper to INSERT / UPDATE story's Bit.ly statistics
 CREATE FUNCTION upsert_bitly_story_clicks (
     param_stories_id INT,
