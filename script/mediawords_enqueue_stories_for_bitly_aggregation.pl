@@ -98,10 +98,6 @@ EOF
                 WHERE controversies_id = ?
                   AND stories_id NOT IN (
                     SELECT stories_id
-                    FROM bitly_story_daily_clicks
-                  )
-                  AND stories_id NOT IN (
-                    SELECT stories_id
                     FROM bitly_story_referrers
                   )
                 ORDER BY stories_id

@@ -1906,10 +1906,6 @@ BEGIN
     WHERE controversies_id = param_controversies_id
       AND stories_id NOT IN (
         SELECT stories_id
-        FROM bitly_story_daily_clicks
-      )
-      AND stories_id NOT IN (
-        SELECT stories_id
         FROM bitly_story_referrers
       )
     GROUP BY controversies_id;
