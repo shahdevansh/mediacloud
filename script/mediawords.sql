@@ -1767,7 +1767,7 @@ create index stories_id on cd.stories ( controversy_dumps_id, stories_id );
 -- Bit.ly click statistics for stories, broken down into days (sparse table --
 -- only days for which there are records are stored)
 CREATE TABLE bitly_story_daily_clicks (
-    bitly_story_statistics_id   SERIAL      PRIMARY KEY,
+    bitly_story_daily_clicks_id SERIAL      PRIMARY KEY,
     stories_id                  INT         NOT NULL REFERENCES stories ON DELETE CASCADE,
 
     -- Day for which the click count is being saved
@@ -1836,7 +1836,7 @@ LANGUAGE plpgsql;
 
 -- Bit.ly referrer statistics for stories
 CREATE TABLE bitly_story_referrers (
-    bitly_story_statistics_id   SERIAL      PRIMARY KEY,
+    bitly_story_referrers_id    SERIAL      PRIMARY KEY,
     stories_id                  INT         NOT NULL REFERENCES stories ON DELETE CASCADE,
 
     -- Day range for which the referrer count is being saved
