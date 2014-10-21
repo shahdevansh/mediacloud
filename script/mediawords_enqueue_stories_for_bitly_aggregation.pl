@@ -3,8 +3,8 @@
 # Enqueue stories that have their Bit.ly stats fetched but not yet aggregated
 #
 # If you append "--overwrite" parameter, script will first remove story entries
-# from "bitly_story_statistics" table and then enqueue all controversy's
-# stories for re-aggregation.
+# from "bitly_story_daily_clicks" and "bitly_story_referrers" tables and then
+# enqueue all controversy's stories for re-aggregation.
 #
 
 use strict;
@@ -122,10 +122,17 @@ EOF
 
             if ( $overwrite )
             {
-                say STDERR "Removing old aggregation result from 'bitly_story_statistics' for story $stories_id...";
+                say STDERR "Removing old aggregation results for story $stories_id...";
                 $db->query(
                     <<EOF,
-                    DELETE FROM bitly_story_statistics
+                    DELETE FROM bitly_story_daily_clicks
+                    WHERE stories_id = ?
+EOF
+                    $stories_id
+                );
+                $db->query(
+                    <<EOF,
+                    DELETE FROM bitly_story_referrers
                     WHERE stories_id = ?
 EOF
                     $stories_id
