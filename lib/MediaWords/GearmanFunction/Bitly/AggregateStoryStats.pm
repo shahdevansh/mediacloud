@@ -66,8 +66,20 @@ sub run($;$)
         die "Stats for story $stories_id is not a hashref.";
     }
 
-    my $click_count    = 0;
-    my $referrer_count = 0;
+    # {
+    #     timestamp => click_count,
+    #     ...
+    # }
+    my $click_counts = {};
+
+    # {
+    #     start_timestamp => {
+    #         end_timestamp => referrer_count,
+    #         ...
+    #     },
+    #     ...
+    # }
+    my $referrer_counts = {};
 
     # Aggregate stats
     if ( $stats->{ 'error' } )
@@ -118,7 +130,14 @@ sub run($;$)
             {
                 foreach my $link_clicks ( @{ $bitly_clicks->{ 'link_clicks' } } )
                 {
-                    $click_count += $link_clicks->{ 'clicks' };
+                    my $link_clicks_timestamp = $link_clicks->{ 'dt' } + 0;
+                    my $link_clicks_count     = $link_clicks->{ 'clicks' } + 0;
+
+                    unless ( defined $click_counts->{ $link_clicks_timestamp } )
+                    {
+                        $click_counts->{ $link_clicks_timestamp } = 0;
+                    }
+                    $click_counts->{ $link_clicks_timestamp } += $link_clicks_count;
                 }
             }
 
@@ -129,21 +148,92 @@ sub run($;$)
             }
             foreach my $bitly_referrers ( @{ $bitly_data->{ 'referrers' } } )
             {
-                $referrer_count += scalar( @{ $bitly_referrers->{ 'referrers' } } );
+                unless ( defined $bitly_referrers->{ 'unit_reference_ts' } )
+                {
+                    die
+"Bit.ly stats hashref doesn't have 'referrers/unit_reference_ts' key for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+                unless ( defined $bitly_referrers->{ 'unit' } )
+                {
+                    die "Bit.ly stats hashref doesn't have 'referrers/unit' key for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+                unless ( defined $bitly_referrers->{ 'units' } )
+                {
+                    die
+                      "Bit.ly stats hashref doesn't have 'referrers/units' key for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+                unless ( defined $bitly_referrers->{ 'tz_offset' } )
+                {
+                    die
+"Bit.ly stats hashref doesn't have 'referrers/tz_offset' key for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+                unless ( $bitly_referrers->{ 'unit' } eq 'day' )
+                {
+                    die
+"Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+                unless ( $bitly_referrers->{ 'tz_offset' } == 0 )
+                {
+                    die
+"Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' for Bit.ly ID $bitly_id, story $stories_id.";
+                }
+
+                my $referrer_end_timestamp = $bitly_referrers->{ 'unit_reference_ts' };
+                my $referrer_start_timestamp =
+                  $referrer_end_timestamp - ( ( $bitly_referrers->{ 'units' } - 1 ) * 24 * 60 * 60 );
+                my $referrer_count = scalar( @{ $bitly_referrers->{ 'referrers' } } );
+
+                unless ( defined $referrer_counts->{ $referrer_start_timestamp } )
+                {
+                    $referrer_counts->{ $referrer_start_timestamp } = {};
+                }
+                unless ( defined $referrer_counts->{ $referrer_start_timestamp }->{ $referrer_end_timestamp } )
+                {
+                    $referrer_counts->{ $referrer_start_timestamp }->{ $referrer_end_timestamp } = 0;
+                }
+                $referrer_counts->{ $referrer_start_timestamp }->{ $referrer_end_timestamp } += $referrer_count;
             }
         }
     }
 
-    say STDERR "Story's $stories_id click count: $click_count";
-    say STDERR "Story's $stories_id referrer count: $referrer_count";
+    # say STDERR "Story's $stories_id click counts: " . Dumper($click_counts);
+    # say STDERR "Story's $stories_id referrer counts: " . Dumper($referrer_counts);
 
-    # Store stats ("upsert" the record into "bitly_story_statistics" table)
-    $db->query(
-        <<EOF,
-        SELECT upsert_bitly_story_statistics(?, ?, ?)
+    # Store stats
+    foreach my $click_timestamp ( sort keys %{ $click_counts } )
+    {
+        my $click_count = $click_counts->{ $click_timestamp };
+
+        $db->query(
+            <<EOF,
+            SELECT upsert_bitly_story_daily_clicks(
+                ?,
+                (TO_TIMESTAMP(?) AT TIME ZONE 'GMT')::date,
+                ?
+            )
 EOF
-        $stories_id, $click_count, $referrer_count
-    );
+            $stories_id, $click_timestamp, $click_count
+        );
+    }
+    foreach my $referrer_start_timestamp ( sort keys %{ $referrer_counts } )
+    {
+        foreach my $referrer_end_timestamp ( sort keys %{ $referrer_counts->{ $referrer_start_timestamp } } )
+        {
+            my $referrer_count = $referrer_counts->{ $referrer_start_timestamp }->{ $referrer_end_timestamp };
+
+            $db->query(
+                <<EOF,
+                SELECT upsert_bitly_story_referrers(
+                    ?,
+                    (TO_TIMESTAMP(?) AT TIME ZONE 'GMT')::date,
+                    (TO_TIMESTAMP(?) AT TIME ZONE 'GMT')::date,
+                    ?
+                )
+EOF
+                $stories_id, $referrer_start_timestamp, $referrer_end_timestamp, $referrer_count
+            );
+        }
+    }
 
     say STDERR "Done aggregating story stats for story $stories_id.";
 }
