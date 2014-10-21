@@ -143,6 +143,46 @@ $$
 LANGUAGE plpgsql;
 
 
+-- Bit.ly stories that have gone through the processing chain
+-- (some stories are not found on Bit.ly and thus have no stats, so we need to
+-- keep a separate table of all processed stories)
+CREATE TABLE bitly_processed_stories (
+    bitly_story_referrers_id    SERIAL      PRIMARY KEY,
+    stories_id                  INT         NOT NULL UNIQUE REFERENCES stories ON DELETE CASCADE
+);
+
+-- Helper to INSERT / UPDATE story's Bit.ly statistics
+CREATE FUNCTION upsert_bitly_processed_stories (
+    param_stories_id INT
+) RETURNS VOID AS
+$$
+DECLARE
+    bitly_story_has_been_processed BOOL;
+BEGIN
+
+    LOOP
+        -- Try UPDATing
+        SELECT 1 INTO bitly_story_has_been_processed
+        FROM bitly_processed_stories
+        WHERE stories_id = param_stories_id;
+        IF FOUND THEN RETURN; END IF;
+
+        -- Nothing to UPDATE, try to INSERT a new record
+        BEGIN
+            INSERT INTO bitly_processed_stories (stories_id)
+            VALUES (param_stories_id);
+            RETURN;
+        EXCEPTION WHEN UNIQUE_VIOLATION THEN
+            -- If someone else INSERTs the same key concurrently,
+            -- we will get a unique-key failure. In that case, do
+            -- nothing and loop to try the UPDATE again.
+        END;
+    END LOOP;
+END;
+$$
+LANGUAGE plpgsql;
+
+-- Helper to return a number of stories for which we don't have Bit.ly statistics yet
 CREATE FUNCTION num_controversy_stories_without_bitly_statistics (param_controversies_id INT) RETURNS INT AS
 $$
 DECLARE
@@ -164,7 +204,7 @@ BEGIN
     WHERE controversies_id = param_controversies_id
       AND stories_id NOT IN (
         SELECT stories_id
-        FROM bitly_story_referrers
+        FROM bitly_processed_stories
       )
     GROUP BY controversies_id;
     IF NOT FOUND THEN

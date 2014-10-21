@@ -98,7 +98,7 @@ EOF
                 WHERE controversies_id = ?
                   AND stories_id NOT IN (
                     SELECT stories_id
-                    FROM bitly_story_referrers
+                    FROM bitly_processed_stories
                   )
                 ORDER BY stories_id
 EOF
@@ -129,6 +129,13 @@ EOF
                 $db->query(
                     <<EOF,
                     DELETE FROM bitly_story_referrers
+                    WHERE stories_id = ?
+EOF
+                    $stories_id
+                );
+                $db->query(
+                    <<EOF,
+                    DELETE FROM bitly_processed_stories
                     WHERE stories_id = ?
 EOF
                     $stories_id

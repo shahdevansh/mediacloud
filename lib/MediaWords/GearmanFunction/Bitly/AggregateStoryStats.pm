@@ -235,6 +235,14 @@ EOF
         }
     }
 
+    # Mark the story as processed
+    $db->query(
+        <<EOF,
+        SELECT upsert_bitly_processed_stories(?)
+EOF
+        $stories_id
+    );
+
     say STDERR "Done aggregating story stats for story $stories_id.";
 }
 
