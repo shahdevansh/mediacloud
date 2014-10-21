@@ -18,9 +18,9 @@
 SET search_path = public, pg_catalog;
 
 
-DROP FUNCTION upsert_bitly_story_statistics(INT, INT, INT);
+DROP FUNCTION upsert_story_bitly_statistics(INT, INT, INT);
 DROP FUNCTION num_controversy_stories_without_bitly_statistics(INT);
-DROP TABLE bitly_story_statistics;
+DROP TABLE story_bitly_statistics;
 
 
 -- Bit.ly click statistics for stories, broken down into days (sparse table --
