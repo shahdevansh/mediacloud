@@ -1783,10 +1783,12 @@ CREATE UNIQUE INDEX bitly_story_clicks_stories_id_date
 CREATE VIEW bitly_story_clicks_retrieved AS
     SELECT stories_id,
            MIN(click_date) AS click_start_date,
-           MAX(click_date) AS click_end_date
+           MAX(click_date) AS click_end_date,
+           SUM(click_count) AS click_count
     FROM (
         SELECT stories_id,
                click_date,
+               click_count,
 
                -- 1. Compute a running, gap-less number in chronological order with the window function row_number()
                -- 2. Deduct that from the date column in each row (after converting to integer).
