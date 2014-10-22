@@ -43,22 +43,15 @@ my $_media_static_gexf_attribute_types = {
 };
 
 # all tables that the dump process snapshots for each controversy_dump
-my $_snapshot_tables = [
-    qw/controversy_stories controversy_links_cross_media controversy_media_codes
-      stories media stories_tags_map media_tags_map tags tag_sets/
-];
+my @_snapshot_tables = qw/
+  controversy_stories controversy_links_cross_media controversy_media_codes
+  stories media stories_tags_map media_tags_map tags tag_sets/;
 
 # tablespace clause for temporary tables
 my $_temporary_tablespace;
 
 # temporary hack to get around dump_period_stories lock
 my $_drop_dump_period_stories = 1;
-
-# get the list of all snapshot tables
-sub get_snapshot_tables
-{
-    return [ @{ $_snapshot_tables } ];
-}
 
 # if the temporary_table_tablespace config is present, set $_temporary_tablespace
 # to a tablespace clause for the tablespace, otherwise set it to ''
@@ -104,9 +97,7 @@ sub create_temporary_dump_views
 {
     my ( $db, $cdts ) = @_;
 
-    my $snapshot_tables = get_snapshot_tables();
-
-    for my $t ( @{ $snapshot_tables } )
+    for my $t ( @_snapshot_tables )
     {
         $db->query( <<END );
 create temporary view dump_$t as select * from cd.$t 
@@ -1373,8 +1364,7 @@ sub copy_temporary_tables
 {
     my ( $db ) = @_;
 
-    my $snapshot_tables = get_snapshot_tables();
-    for my $snapshot_table ( @{ $snapshot_tables } )
+    for my $snapshot_table ( @_snapshot_tables )
     {
         my $dump_table = "dump_${ snapshot_table }";
         my $copy_table = "_copy_${ dump_table }";
@@ -1389,8 +1379,7 @@ sub restore_temporary_tables
 {
     my ( $db ) = @_;
 
-    my $snapshot_tables = MediaWords::CM::Dump::get_snapshot_tables();
-    for my $snapshot_table ( @{ $snapshot_tables } )
+    for my $snapshot_table ( @_snapshot_tables )
     {
         my $dump_table = "dump_${ snapshot_table }";
         my $copy_table = "_copy_${ dump_table }";
@@ -1577,14 +1566,12 @@ END
 
 }
 
-# generate snapshots for all of the get_snapshot_tables from the temporary dump tables
+# generate snapshots for all of the snapshot tables from the temporary dump tables
 sub generate_snapshots_from_temporary_dump_tables
 {
     my ( $db, $cd ) = @_;
 
-    my $snapshot_tables = get_snapshot_tables();
-
-    map { create_cd_snapshot( $db, $cd, $_ ) } @{ $_snapshot_tables };
+    map { create_cd_snapshot( $db, $cd, $_ ) } @_snapshot_tables;
 }
 
 # create the controversy_dump row for the current dump
@@ -1612,9 +1599,7 @@ sub analyze_snapshot_tables
 
     print STDERR "analyzing tables...\n";
 
-    my $snapshot_tables = get_snapshot_tables();
-
-    for my $t ( @{ $snapshot_tables } )
+    for my $t ( @_snapshot_tables )
     {
         $db->query( "analyze cd.$t" );
     }
