@@ -848,27 +848,6 @@ sub layout_gexf
     return $layout_gexf;
 }
 
-# get the size of the individual node based on the medium and the total number of links in the graph
-sub get_node_size
-{
-    my ( $medium, $total_link_count ) = @_;
-
-    print STDERR "get_node_size: $medium->{ name } [ $medium->{ inlink_count } / $total_link_count ]\n";
-
-    my $scale = 100;
-
-    # my $min_size = $scale * ( 1 / $total_link_count );
-    # $scale = 3 * ( $scale / $min_size ) if ( $min_size < 3 );
-
-    my $size = $scale * ( ( $medium->{ inlink_count } + 1 ) / $total_link_count );
-
-    $size = 1 if ( $size < 1 );
-
-    #print STDERR "size: $size\n";
-
-    return $size;
-}
-
 # scale the nodes such that the biggest node size is MAX_NODE_SIZE and the smallest is MIN_NODE_SIZE
 sub scale_node_sizes
 {
