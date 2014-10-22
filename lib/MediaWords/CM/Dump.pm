@@ -1391,21 +1391,6 @@ sub analyze_snapshot_tables
     }
 }
 
-# validate and set the periods for the dump based on the period parameter
-sub get_periods ($)
-{
-    my ( $period ) = @_;
-
-    $period ||= 'all';
-
-    my $all_periods = [ qw(custom overall weekly monthly) ];
-
-    die( "period must be all, custom, overall, weekly, or monthly" )
-      if ( $period && !grep { $_ eq $period } ( 'all', @{ $all_periods } ) );
-
-    return ( $period eq 'all' ) ? $all_periods : [ $period ];
-}
-
 # get the tags associated with the controversy through controversy_dump_tags
 sub get_dump_tags
 {
