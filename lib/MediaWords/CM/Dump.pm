@@ -13,6 +13,7 @@ use FileHandle;
 use Getopt::Long;
 use XML::Simple;
 use Readonly;
+use Scalar::Defer;
 
 use MediaWords::CM::Model;
 use MediaWords::DBI::Media;
@@ -48,21 +49,19 @@ my @_snapshot_tables = qw/
   stories media stories_tags_map media_tags_map tags tag_sets/;
 
 # tablespace clause for temporary tables
-my $_temporary_tablespace;
-
-# temporary hack to get around dump_period_stories lock
-my $_drop_dump_period_stories = 1;
-
-# if the temporary_table_tablespace config is present, set $_temporary_tablespace
-# to a tablespace clause for the tablespace, otherwise set it to ''
-sub set_temporary_table_tablespace
+my $_temporary_tablespace = lazy
 {
+    # if the temporary_table_tablespace config is present, set $_temporary_tablespace
+    # to a tablespace clause for the tablespace, otherwise set it to ''
     my $config = MediaWords::Util::Config::get_config;
 
     my $tablespace = $config->{ mediawords }->{ temporary_table_tablespace };
 
-    $_temporary_tablespace = $tablespace ? "tablespace $tablespace" : '';
-}
+    return $tablespace ? "tablespace $tablespace" : '';
+};
+
+# temporary hack to get around dump_period_stories lock
+my $_drop_dump_period_stories = 1;
 
 # create all of the temporary dump* tables other than medium_links and story_links
 sub write_live_dump_tables
@@ -1440,8 +1439,6 @@ sub create_cd_snapshot
 sub write_temporary_dump_tables
 {
     my ( $db, $controversies_id ) = @_;
-
-    set_temporary_table_tablespace();
 
     $db->query( <<END, $controversies_id );
 create temporary table dump_controversy_stories $_temporary_tablespace as 
