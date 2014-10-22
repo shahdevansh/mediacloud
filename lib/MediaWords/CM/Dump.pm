@@ -60,9 +60,6 @@ my $_temporary_tablespace = lazy
     return $tablespace ? "tablespace $tablespace" : '';
 };
 
-# temporary hack to get around dump_period_stories lock
-my $_drop_dump_period_stories = 1;
-
 # create all of the temporary dump* tables other than medium_links and story_links
 sub _write_live_dump_tables
 {
