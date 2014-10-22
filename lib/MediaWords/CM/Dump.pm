@@ -631,15 +631,6 @@ END
     write_date_counts_csv( $db, $cd, $period );
 }
 
-sub attach_stories_to_media
-{
-    my ( $stories, $media ) = @_;
-
-    my $media_lookup = {};
-    map { $media_lookup->{ $_->{ media_id } } = $_ } @{ $media };
-    map { push( @{ $media_lookup->{ $_->{ media_id } }->{ stories } }, $_ ) } @{ $stories };
-}
-
 sub add_tags_to_gexf_attribute_types
 {
     my ( $db, $cdts ) = @_;
