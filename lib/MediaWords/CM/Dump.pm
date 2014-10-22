@@ -64,7 +64,7 @@ my $_temporary_tablespace = lazy
 my $_drop_dump_period_stories = 1;
 
 # create all of the temporary dump* tables other than medium_links and story_links
-sub write_live_dump_tables
+sub _write_live_dump_tables
 {
     my ( $db, $controversy, $cdts ) = @_;
 
@@ -79,12 +79,12 @@ sub write_live_dump_tables
         $controversies_id = $cd->{ controversies_id };
     }
 
-    write_temporary_dump_tables( $db, $controversies_id );
-    write_period_stories( $db, $cdts );
-    write_story_link_counts_dump( $db, $cdts, 1 );
-    write_story_links_dump( $db, $cdts, 1 );
-    write_medium_link_counts_dump( $db, $cdts, 1 );
-    write_medium_links_dump( $db, $cdts, 1 );
+    _write_temporary_dump_tables( $db, $controversies_id );
+    _write_period_stories( $db, $cdts );
+    _write_story_link_counts_dump( $db, $cdts, 1 );
+    _write_story_links_dump( $db, $cdts, 1 );
+    _write_medium_link_counts_dump( $db, $cdts, 1 );
+    _write_medium_links_dump( $db, $cdts, 1 );
 }
 
 # create temporary view of all the dump_* tables that call into the cd.* tables.
@@ -92,7 +92,7 @@ sub write_live_dump_tables
 # joins and clauses to cd and cdts.  It also provides the same set of dump_*
 # tables as provided by write_story_link_counts_dump_tables, so that the same
 # set of queries can run against either.
-sub create_temporary_dump_views
+sub _create_temporary_dump_views
 {
     my ( $db, $cdts ) = @_;
 
@@ -112,7 +112,7 @@ create temporary view dump_$t as select * from cd.$t
 END
     }
 
-    add_media_type_views( $db );
+    _add_media_type_views( $db );
 }
 
 # setup dump_* tables by either creating views for the relevant cd.*
@@ -126,11 +126,11 @@ sub setup_temporary_dump_tables
 
     if ( $live )
     {
-        MediaWords::CM::Dump::write_live_dump_tables( $db, $controversy, $cdts );
+        _write_live_dump_tables( $db, $controversy, $cdts );
     }
     else
     {
-        MediaWords::CM::Dump::create_temporary_dump_views( $db, $cdts );
+        _create_temporary_dump_views( $db, $cdts );
     }
 }
 
@@ -143,7 +143,7 @@ sub discard_temp_tables
 }
 
 # remove stories from dump_period_stories that don't match the $csts->{ tags_id }, if present
-sub restrict_period_stories_to_tag
+sub _restrict_period_stories_to_tag
 {
     my ( $db, $cdts ) = @_;
 
@@ -160,7 +160,7 @@ END
 
 # get the where clause that will restrict the dump_period_stories creation
 # to only stories within the cdts time frame
-sub get_period_stories_date_where_clause
+sub _get_period_stories_date_where_clause
 {
     my ( $cdts ) = @_;
 
@@ -185,7 +185,7 @@ END
 #
 # The resulting dump_period_stories should be used by all other dump queries to determine
 # story membership within a give period.
-sub write_period_stories
+sub _write_period_stories
 {
     my ( $db, $cdts ) = @_;
 
@@ -210,7 +210,7 @@ create or replace temporary view dump_undateable_stories as
             t.tag = 'undateable'
 END
 
-        my $date_where_clause = get_period_stories_date_where_clause( $cdts );
+        my $date_where_clause = _get_period_stories_date_where_clause( $cdts );
 
         $db->query( <<"END", $cdts->{ start_date }, $cdts->{ end_date } );
 create temporary table dump_period_stories $_temporary_tablespace as
@@ -227,11 +227,11 @@ END
 
     if ( $cdts->{ tags_id } )
     {
-        restrict_period_stories_to_tag( $db, $cdts );
+        _restrict_period_stories_to_tag( $db, $cdts );
     }
 }
 
-sub create_cdts_file
+sub _create_cdts_file
 {
     my ( $db, $cdts, $file_name, $file_content ) = @_;
 
@@ -244,7 +244,7 @@ sub create_cdts_file
     return $db->create( 'cdts_files', $cdts_file );
 }
 
-sub create_cd_file
+sub _create_cd_file
 {
     my ( $db, $cd, $file_name, $file_content ) = @_;
 
@@ -265,7 +265,7 @@ sub update_cdts
     $db->update_by_id( 'controversy_dump_time_slices', $cdts->{ controversy_dump_time_slices_id }, { $field => $val } );
 }
 
-sub get_story_links_csv
+sub _get_story_links_csv
 {
     my ( $db, $cdts ) = @_;
 
@@ -284,16 +284,16 @@ END
     return $csv;
 }
 
-sub write_story_links_csv
+sub _write_story_links_csv
 {
     my ( $db, $cdts ) = @_;
 
-    my $csv = get_story_links_csv( $db, $cdts );
+    my $csv = _get_story_links_csv( $db, $cdts );
 
-    create_cdts_file( $db, $cdts, 'story_links.csv', $csv );
+    _create_cdts_file( $db, $cdts, 'story_links.csv', $csv );
 }
 
-sub write_story_links_dump
+sub _write_story_links_dump
 {
     my ( $db, $cdts, $is_model ) = @_;
 
@@ -312,12 +312,12 @@ END
 
     if ( !$is_model )
     {
-        create_cdts_snapshot( $db, $cdts, 'story_links' );
-        write_story_links_csv( $db, $cdts );
+        _create_cdts_snapshot( $db, $cdts, 'story_links' );
+        _write_story_links_csv( $db, $cdts );
     }
 }
 
-sub get_stories_csv
+sub _get_stories_csv
 {
     my ( $db, $cdts ) = @_;
 
@@ -368,16 +368,16 @@ END
     return $csv;
 }
 
-sub write_stories_csv
+sub _write_stories_csv
 {
     my ( $db, $cdts ) = @_;
 
-    my $csv = get_stories_csv( $db, $cdts );
+    my $csv = _get_stories_csv( $db, $cdts );
 
-    create_cdts_file( $db, $cdts, 'stories.csv', $csv );
+    _create_cdts_file( $db, $cdts, 'stories.csv', $csv );
 }
 
-sub write_story_link_counts_dump
+sub _write_story_link_counts_dump
 {
     my ( $db, $cdts, $is_model ) = @_;
 
@@ -427,12 +427,12 @@ END
 
     if ( !$is_model )
     {
-        create_cdts_snapshot( $db, $cdts, 'story_link_counts' );
-        write_stories_csv( $db, $cdts );
+        _create_cdts_snapshot( $db, $cdts, 'story_link_counts' );
+        _write_stories_csv( $db, $cdts );
     }
 }
 
-sub add_tags_to_dump_media
+sub _add_tags_to_dump_media
 {
     my ( $db, $cdts, $media ) = @_;
 
@@ -464,7 +464,7 @@ END
     return $tag_fields;
 }
 
-sub add_codes_to_dump_media
+sub _add_codes_to_dump_media
 {
     my ( $db, $cdts, $media ) = @_;
 
@@ -491,7 +491,7 @@ END
     return $code_fields;
 }
 
-sub get_media_csv
+sub _get_media_csv
 {
     my ( $db, $cdts ) = @_;
 
@@ -506,8 +506,8 @@ END
     my $fields = $res->columns;
     my $media  = $res->hashes;
 
-    my $code_fields = add_codes_to_dump_media( $db, $cdts, $media );
-    my $tag_fields = add_tags_to_dump_media( $db, $cdts, $media );
+    my $code_fields = _add_codes_to_dump_media( $db, $cdts, $media );
+    my $tag_fields = _add_tags_to_dump_media( $db, $cdts, $media );
 
     push( @{ $fields }, @{ $code_fields } );
     push( @{ $fields }, @{ $tag_fields } );
@@ -517,16 +517,16 @@ END
     return $csv;
 }
 
-sub write_media_csv
+sub _write_media_csv
 {
     my ( $db, $cdts ) = @_;
 
-    my $csv = get_media_csv( $db, $cdts );
+    my $csv = _get_media_csv( $db, $cdts );
 
-    create_cdts_file( $db, $cdts, 'media.csv', $csv );
+    _create_cdts_file( $db, $cdts, 'media.csv', $csv );
 }
 
-sub write_medium_link_counts_dump
+sub _write_medium_link_counts_dump
 {
     my ( $db, $cdts, $is_model ) = @_;
 
@@ -547,12 +547,12 @@ END
 
     if ( !$is_model )
     {
-        create_cdts_snapshot( $db, $cdts, 'medium_link_counts' );
-        write_media_csv( $db, $cdts );
+        _create_cdts_snapshot( $db, $cdts, 'medium_link_counts' );
+        _write_media_csv( $db, $cdts );
     }
 }
 
-sub get_medium_links_csv
+sub _get_medium_links_csv
 {
     my ( $db, $cdts ) = @_;
 
@@ -566,16 +566,16 @@ END
     return $csv;
 }
 
-sub write_medium_links_csv
+sub _write_medium_links_csv
 {
     my ( $db, $cdts ) = @_;
 
-    my $csv = get_medium_links_csv( $db, $cdts );
+    my $csv = _get_medium_links_csv( $db, $cdts );
 
-    create_cdts_file( $db, $cdts, 'medium_links.csv', $csv );
+    _create_cdts_file( $db, $cdts, 'medium_links.csv', $csv );
 }
 
-sub write_medium_links_dump
+sub _write_medium_links_dump
 {
     my ( $db, $cdts, $is_model ) = @_;
 
@@ -591,12 +591,12 @@ END
 
     if ( !$is_model )
     {
-        create_cdts_snapshot( $db, $cdts, 'medium_links' );
-        write_medium_links_csv( $db, $cdts );
+        _create_cdts_snapshot( $db, $cdts, 'medium_links' );
+        _write_medium_links_csv( $db, $cdts );
     }
 }
 
-sub write_date_counts_csv
+sub _write_date_counts_csv
 {
     my ( $db, $cd, $period ) = @_;
 
@@ -607,10 +607,10 @@ select dc.publish_date, t.tag, t.tags_id, dc.story_count
     order by t.tag, dc.publish_date
 END
 
-    create_cd_file( $db, $cd, "${ period }_counts.csv", $csv );
+    _create_cd_file( $db, $cd, "${ period }_counts.csv", $csv );
 }
 
-sub write_date_counts_dump
+sub _write_date_counts_dump
 {
     my ( $db, $cd, $period ) = @_;
 
@@ -626,12 +626,12 @@ create temporary table dump_${ period }_date_counts $_temporary_tablespace as
         group by date_trunc( ?, s.publish_date ), t.tags_id
 END
 
-    create_cd_snapshot( $db, $cd, "${ period }_date_counts" );
+    _create_cd_snapshot( $db, $cd, "${ period }_date_counts" );
 
-    write_date_counts_csv( $db, $cd, $period );
+    _write_date_counts_csv( $db, $cd, $period );
 }
 
-sub add_tags_to_gexf_attribute_types
+sub _add_tags_to_gexf_attribute_types
 {
     my ( $db, $cdts ) = @_;
 
@@ -644,7 +644,7 @@ END
     map { $_media_static_gexf_attribute_types->{ "tagged_" . $_->{ tag } } = 'integer' } @{ $tags };
 }
 
-sub add_codes_to_gexf_attribute_types
+sub _add_codes_to_gexf_attribute_types
 {
     my ( $db, $cdts ) = @_;
 
@@ -653,7 +653,7 @@ sub add_codes_to_gexf_attribute_types
     map { $_media_static_gexf_attribute_types->{ "code_" . $_ } = 'string' } @{ $code_types };
 }
 
-sub get_link_weighted_edges
+sub _get_link_weighted_edges
 {
     my ( $db ) = @_;
 
@@ -676,14 +676,14 @@ sub get_link_weighted_edges
     return $edges;
 }
 
-sub get_weighted_edges
+sub _get_weighted_edges
 {
     my ( $db ) = @_;
 
-    return get_link_weighted_edges( $db );
+    return _get_link_weighted_edges( $db );
 }
 
-sub get_media_type_color
+sub _get_media_type_color
 {
     my ( $db, $cdts, $media_type ) = @_;
 
@@ -712,7 +712,7 @@ END
 }
 
 # gephi removes the weights from the media links.  add them back in.
-sub add_weights_to_gexf_edges
+sub _add_weights_to_gexf_edges
 {
     my ( $db, $gexf ) = @_;
 
@@ -735,7 +735,7 @@ sub add_weights_to_gexf_edges
 # scale the size of the map described in the gexf file to 800 x 700.
 # gephi can return really large maps that make the absolute node size relatively tiny.
 # we need to scale the map to get consistent, reasonable node sizes across all maps
-sub scale_gexf_nodes
+sub _scale_gexf_nodes
 {
     my ( $db, $gexf ) = @_;
 
@@ -769,15 +769,15 @@ sub scale_gexf_nodes
 # post process gexf file.  gephi mucks up the gexf file by making it too big and
 # removing the weights from the gexf export.  I can't figure out how to get the gephi toolkit
 # to fix these things, so I just fix them in perl
-sub post_process_gexf
+sub _post_process_gexf
 {
     my ( $db, $gexf_file ) = @_;
 
     my $gexf = XML::Simple::XMLin( $gexf_file, ForceArray => 1, ForceContent => 1, KeyAttr => [] );
 
-    add_weights_to_gexf_edges( $db, $gexf );
+    _add_weights_to_gexf_edges( $db, $gexf );
 
-    scale_gexf_nodes( $db, $gexf );
+    _scale_gexf_nodes( $db, $gexf );
 
     open( FILE, ">$gexf_file" ) || die( "Unable to open file '$gexf_file': $!" );
 
@@ -789,7 +789,7 @@ sub post_process_gexf
 
 # call java program to lay out graph.  the java program accepts a gexf file as input and
 # outputs a gexf file with the lay out included
-sub layout_gexf
+sub _layout_gexf
 {
     my ( $db, $cdts, $nolayout_gexf ) = @_;
 
@@ -830,7 +830,7 @@ sub layout_gexf
         die "Command '$cmd' failed with exit code $exit_code.";
     }
 
-    post_process_gexf( $db, $layout_path );
+    _post_process_gexf( $db, $layout_path );
 
     $fh = FileHandle->new( $layout_path ) || die( "Unable to open file '$layout_path': $!" );
 
@@ -849,7 +849,7 @@ sub layout_gexf
 }
 
 # scale the nodes such that the biggest node size is MAX_NODE_SIZE and the smallest is MIN_NODE_SIZE
-sub scale_node_sizes
+sub _scale_node_sizes
 {
     my ( $nodes ) = @_;
 
@@ -881,19 +881,19 @@ sub scale_node_sizes
 }
 
 # write gexf dump of nodes
-sub write_gexf_dump
+sub _write_gexf_dump
 {
     my ( $db, $cdts ) = @_;
 
-    add_tags_to_gexf_attribute_types( $db, $cdts );
-    add_codes_to_gexf_attribute_types( $db, $cdts );
+    _add_tags_to_gexf_attribute_types( $db, $cdts );
+    _add_codes_to_gexf_attribute_types( $db, $cdts );
 
     my $media = $db->query( <<END )->hashes;
 select * from dump_media_with_types m, dump_medium_link_counts mlc where m.media_id = mlc.media_id
 END
 
-    add_codes_to_dump_media( $db, $cdts, $media );
-    add_tags_to_dump_media( $db, $cdts, $media );
+    _add_codes_to_dump_media( $db, $cdts, $media );
+    _add_tags_to_dump_media( $db, $cdts, $media );
 
     my $gexf = {
         'xmlns'              => "http://www.gexf.net/1.2draft",
@@ -927,7 +927,7 @@ END
         push( @{ $attributes->{ attribute } }, { id => $i++, title => $name, type => $type } );
     }
 
-    my $edges = get_weighted_edges( $db );
+    my $edges = _get_weighted_edges( $db );
     $graph->{ edges }->{ edge } = $edges;
 
     my $edge_lookup = {};
@@ -964,22 +964,22 @@ END
         #     push( @{ $node->{ spells }->{ spell } }, { start => $story_date, end => $story_date } );
         # }
 
-        $node->{ 'viz:color' } = [ get_media_type_color( $db, $cdts, $medium->{ media_type } ) ];
+        $node->{ 'viz:color' } = [ _get_media_type_color( $db, $cdts, $medium->{ media_type } ) ];
         $node->{ 'viz:size' } = { value => $medium->{ inlink_count } + 1 };
 
         push( @{ $graph->{ nodes }->{ node } }, $node );
     }
 
-    scale_node_sizes( $graph->{ nodes }->{ node } );
+    _scale_node_sizes( $graph->{ nodes }->{ node } );
 
     my $nolayout_gexf = XML::Simple::XMLout( $gexf, XMLDecl => 1, RootName => 'gexf' );
 
-    my $layout_gexf = layout_gexf( $db, $cdts, $nolayout_gexf );
+    my $layout_gexf = _layout_gexf( $db, $cdts, $nolayout_gexf );
 
-    create_cdts_file( $db, $cdts, 'media.gexf', encode( 'utf8', $layout_gexf ) );
+    _create_cdts_file( $db, $cdts, 'media.gexf', encode( 'utf8', $layout_gexf ) );
 }
 
-sub create_controversy_dump_time_slice ($$$$$$)
+sub _create_controversy_dump_time_slice($$$$$$)
 {
     my ( $db, $cd, $start_date, $end_date, $period, $tag ) = @_;
 
@@ -1008,13 +1008,12 @@ sub generate_cdts_data ($$;$)
 {
     my ( $db, $cdts, $is_model ) = @_;
 
-    write_period_stories( $db, $cdts );
+    _write_period_stories( $db, $cdts );
 
-    write_story_link_counts_dump( $db, $cdts, $is_model );
-    write_story_links_dump( $db, $cdts, $is_model );
-    write_medium_link_counts_dump( $db, $cdts, $is_model );
-    write_medium_links_dump( $db, $cdts, $is_model );
-
+    _write_story_link_counts_dump( $db, $cdts, $is_model );
+    _write_story_links_dump( $db, $cdts, $is_model );
+    _write_medium_link_counts_dump( $db, $cdts, $is_model );
+    _write_medium_links_dump( $db, $cdts, $is_model );
 }
 
 # update *_count fields in cdts.  save to db unless $live is specified.
@@ -1039,11 +1038,11 @@ sub update_cdts_counts ($$;$)
 }
 
 # generate the dump time slices for the given period, dates, and tag
-sub generate_cdts ($$$$$$)
+sub _generate_cdts($$$$$$)
 {
     my ( $db, $cd, $start_date, $end_date, $period, $tag ) = @_;
 
-    my $cdts = create_controversy_dump_time_slice( $db, $cd, $start_date, $end_date, $period, $tag );
+    my $cdts = _create_controversy_dump_time_slice( $db, $cd, $start_date, $end_date, $period, $tag );
 
     my $dump_label = "${ period }: ${ start_date } - ${ end_date } " . ( $tag ? "[ $tag->{ tag } ]" : "" );
     print "generating $dump_label ...\n";
@@ -1064,11 +1063,11 @@ sub generate_cdts ($$$$$$)
     # my $confidence = get_model_confidence( $db, $cdts, $all_models_top_media );
     # print "confidence: $confidence\n";
 
-    write_gexf_dump( $db, $cdts );
+    _write_gexf_dump( $db, $cdts );
 }
 
 # generate dumps for the periods in controversy_dates
-sub generate_custom_period_dump ($$$ )
+sub _generate_custom_period_dump($$$)
 {
     my ( $db, $cd, $tag ) = @_;
 
@@ -1080,12 +1079,12 @@ END
     {
         my $start_date = $controversy_date->{ start_date };
         my $end_date   = $controversy_date->{ end_date };
-        generate_cdts( $db, $cd, $start_date, $end_date, 'custom', $tag );
+        _generate_cdts( $db, $cd, $start_date, $end_date, 'custom', $tag );
     }
 }
 
 # generate dump for the given period (overall, monthly, weekly, or custom) and the given tag
-sub generate_period_dump ($$$$)
+sub _generate_period_dump($$$$)
 {
     my ( $db, $cd, $period, $tag ) = @_;
 
@@ -1094,7 +1093,7 @@ sub generate_period_dump ($$$$)
 
     if ( $period eq 'overall' )
     {
-        generate_cdts( $db, $cd, $start_date, $end_date, $period, $tag );
+        _generate_cdts( $db, $cd, $start_date, $end_date, $period, $tag );
     }
     elsif ( $period eq 'weekly' )
     {
@@ -1103,7 +1102,7 @@ sub generate_period_dump ($$$$)
         {
             my $w_end_date = MediaWords::Util::SQL::increment_day( $w_start_date, 7 );
 
-            generate_cdts( $db, $cd, $w_start_date, $w_end_date, $period, $tag );
+            _generate_cdts( $db, $cd, $w_start_date, $w_end_date, $period, $tag );
 
             $w_start_date = $w_end_date;
         }
@@ -1116,14 +1115,14 @@ sub generate_period_dump ($$$$)
             my $m_end_date = MediaWords::Util::SQL::increment_day( $m_start_date, 32 );
             $m_end_date = MediaWords::Util::SQL::truncate_to_start_of_month( $m_end_date );
 
-            generate_cdts( $db, $cd, $m_start_date, $m_end_date, $period, $tag );
+            _generate_cdts( $db, $cd, $m_start_date, $m_end_date, $period, $tag );
 
             $m_start_date = $m_end_date;
         }
     }
     elsif ( $period eq 'custom' )
     {
-        generate_custom_period_dump( $db, $cd, $tag );
+        _generate_custom_period_dump( $db, $cd, $tag );
     }
     else
     {
@@ -1132,7 +1131,7 @@ sub generate_period_dump ($$$$)
 }
 
 # get default start and end dates from the query associated with the query_stories_search associated with the controversy
-sub get_default_dates
+sub _get_default_dates
 {
     my ( $db, $controversy ) = @_;
 
@@ -1176,14 +1175,14 @@ sub restore_temporary_tables
         $db->query( "create temporary table $dump_table $_temporary_tablespace as select * from $copy_table" );
     }
 
-    add_media_type_views( $db );
+    _add_media_type_views( $db );
 }
 
 # create a snapshot for the given table from the temporary dump_* table,
 # making sure to specify all the fields in the copy so that we don't have to
 # assume column position is the same in the original and snapshot tables.
 # use the $key from $obj as an additional field in the snapshot table.
-sub create_snapshot
+sub _create_snapshot
 {
     my ( $db, $obj, $key, $table ) = @_;
 
@@ -1208,24 +1207,24 @@ END
 }
 
 # create a snapshot of a table for a controversy_dump_time_slice
-sub create_cdts_snapshot
+sub _create_cdts_snapshot
 {
     my ( $db, $cdts, $table ) = @_;
 
-    create_snapshot( $db, $cdts, 'controversy_dump_time_slices_id', $table );
+    _create_snapshot( $db, $cdts, 'controversy_dump_time_slices_id', $table );
 }
 
 # create a snapshot of a table for a controversy_dump
-sub create_cd_snapshot
+sub _create_cd_snapshot
 {
     my ( $db, $cd, $table ) = @_;
 
-    create_snapshot( $db, $cd, 'controversy_dumps_id', $table );
+    _create_snapshot( $db, $cd, 'controversy_dumps_id', $table );
 }
 
 # generate temporary dump_* tables for the specified controversy_dump for each of the snapshot_tables.
 # these are the tables that apply to the whole controversy_dump.
-sub write_temporary_dump_tables
+sub _write_temporary_dump_tables
 {
     my ( $db, $controversies_id ) = @_;
 
@@ -1305,11 +1304,11 @@ create temporary table dump_tag_sets $_temporary_tablespace as
     where ts.tag_sets_id in ( select tag_sets_id from dump_tags )
 END
 
-    add_media_type_views( $db );
+    _add_media_type_views( $db );
 
 }
 
-sub add_media_type_views
+sub _add_media_type_views
 {
     my ( $db ) = @_;
 
@@ -1353,15 +1352,15 @@ END
 }
 
 # generate snapshots for all of the snapshot tables from the temporary dump tables
-sub generate_snapshots_from_temporary_dump_tables
+sub _generate_snapshots_from_temporary_dump_tables
 {
     my ( $db, $cd ) = @_;
 
-    map { create_cd_snapshot( $db, $cd, $_ ) } @_snapshot_tables;
+    map { _create_cd_snapshot( $db, $cd, $_ ) } @_snapshot_tables;
 }
 
 # create the controversy_dump row for the current dump
-sub create_controversy_dump ($$$$)
+sub _create_controversy_dump($$$$)
 {
     my ( $db, $controversy, $start_date, $end_date ) = @_;
 
@@ -1379,7 +1378,7 @@ END
 
 # analyze all of the snapshot tables because otherwise immediate queries to the
 # new dump ids offer trigger seq scans
-sub analyze_snapshot_tables
+sub _analyze_snapshot_tables
 {
     my ( $db ) = @_;
 
@@ -1392,7 +1391,7 @@ sub analyze_snapshot_tables
 }
 
 # get the tags associated with the controversy through controversy_dump_tags
-sub get_dump_tags
+sub _get_dump_tags
 {
     my ( $db, $controversy ) = @_;
 
@@ -1432,28 +1431,28 @@ sub dump_controversy ($$)
         die "Unable to log the 'cm_dump_controversy' activity.";
     }
 
-    my ( $start_date, $end_date ) = get_default_dates( $db, $controversy );
+    my ( $start_date, $end_date ) = _get_default_dates( $db, $controversy );
 
-    my $dump_tags = get_dump_tags( $db, $controversy );
+    my $dump_tags = _get_dump_tags( $db, $controversy );
 
-    my $cd = create_controversy_dump( $db, $controversy, $start_date, $end_date );
+    my $cd = _create_controversy_dump( $db, $controversy, $start_date, $end_date );
 
-    write_temporary_dump_tables( $db, $controversy->{ controversies_id } );
+    _write_temporary_dump_tables( $db, $controversy->{ controversies_id } );
 
-    generate_snapshots_from_temporary_dump_tables( $db, $cd );
+    _generate_snapshots_from_temporary_dump_tables( $db, $cd );
 
     for my $t ( undef, @{ $dump_tags } )
     {
         for my $p ( @{ $periods } )
         {
-            generate_period_dump( $db, $cd, $p, $t );
+            _generate_period_dump( $db, $cd, $p, $t );
         }
     }
 
-    write_date_counts_dump( $db, $cd, 'daily' );
-    write_date_counts_dump( $db, $cd, 'weekly' );
+    _write_date_counts_dump( $db, $cd, 'daily' );
+    _write_date_counts_dump( $db, $cd, 'weekly' );
 
-    analyze_snapshot_tables( $db );
+    _analyze_snapshot_tables( $db );
 }
 
 1;
