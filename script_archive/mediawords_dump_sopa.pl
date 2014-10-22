@@ -475,19 +475,6 @@ sub get_weighted_edges
     }
 }
 
-# given an rgb hex string, return a hash in the form { r => 12, g => 0, b => 255 }, which is
-# what we need for the viz:color element of the gexf dump
-sub get_color_hash_from_hex
-{
-    my ( $rgb_hex ) = @_;
-
-    return {
-        r => hex( substr( $rgb_hex, 0, 2 ) ),
-        g => hex( substr( $rgb_hex, 2, 2 ) ),
-        b => hex( substr( $rgb_hex, 4, 2 ) )
-    };
-}
-
 sub get_media_type_color
 {
     my ( $db, $media_type ) = @_;
@@ -500,8 +487,8 @@ sub get_media_type_color
 
     my $num_colors = scalar( @{ $all_media_types } ) + 1;
 
-   # my $color_mix = Color::Mix->new;
-   # my $color_list = [ map { get_color_hash_from_hex( $_ ) } $color_mix->analogous( '0000ff',  $num_colors, $num_colors ) ];
+# my $color_mix = Color::Mix->new;
+# my $color_list = [ map { MediaWords::Util::Colors::get_color_hash_from_hex( $_ ) } $color_mix->analogous( '0000ff',  $num_colors, $num_colors ) ];
     my $color_list = MediaWords::Util::Colors::get_colors( $num_colors, 'rgb()' );
 
     $_media_type_color_map = {};

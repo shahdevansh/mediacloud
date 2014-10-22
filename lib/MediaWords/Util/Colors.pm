@@ -1,10 +1,12 @@
 package MediaWords::Util::Colors;
-use Modern::Perl "2013";
-use MediaWords::CommonLibs;
 
 # util functions that help dealing with colors, including color pallette generation
 
 use strict;
+use warnings;
+
+use Modern::Perl "2013";
+use MediaWords::CommonLibs;
 
 my $_mc_colors = [
     '1f77b4', 'aec7e8', 'ff7f0e', 'ffbb78', '2ca02c', '98df8a', 'd62728', 'ff9896', '9467bd', 'c5b0d5',
@@ -52,6 +54,19 @@ sub get_rgbp_format
       hex( substr( $hex, 0, 2 ) ) . ',' .
       hex( substr( $hex, 2, 2 ) ) . ',' .
       hex( substr( $hex, 4, 2 ) ) . ')';
+}
+
+# given an rgb hex string, return a hash in the form { r => 12, g => 0, b => 255 }, which is
+# what we need for the viz:color element of the gexf dump
+sub get_color_hash_from_hex
+{
+    my ( $rgb_hex ) = @_;
+
+    return {
+        r => hex( substr( $rgb_hex, 0, 2 ) ),
+        g => hex( substr( $rgb_hex, 2, 2 ) ),
+        b => hex( substr( $rgb_hex, 4, 2 ) )
+    };
 }
 
 1;
