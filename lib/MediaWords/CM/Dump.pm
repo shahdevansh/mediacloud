@@ -979,109 +979,6 @@ END
     create_cdts_file( $db, $cdts, 'media.gexf', encode( 'utf8', $layout_gexf ) );
 }
 
-# dump csv of all links from one story to another in the given story's future
-sub write_post_dated_links_dump
-{
-    my ( $db, $controversy ) = @_;
-
-    write_dump_as_csv( $db, $controversy, 'controversy_post_dated_links_dump', <<END );
-select count(*) post_dated_links, sb.stories_id, min( sb.url ) url, min( sb.publish_date ) publish_date 
-    from stories sa, stories sb, controversy_links_cross_media cl 
-    where sa.stories_id = cl.stories_id and sb.stories_id = cl.ref_stories_id and 
-        sa.publish_date < sb.publish_date - interval '1 day' and 
-        not ( sa.url like '%google.search%' ) and
-        cl.controversies_id = $controversy->{ controversies_id }
-    group by sb.stories_id order by count(*) desc;
-END
-
-}
-
-# dump csv of all stories linking to another in the given story's future
-sub write_post_dated_stories_dump
-{
-    my ( $db, $controversy ) = @_;
-
-    write_dump_as_csv( $db, $controversy, 'controversy_post_dated_stories_dump', <<END );
-select distinct sa.stories_id, sa.url, sa.publish_date, 
-        count(sa.stories_id) OVER (PARTITION BY sb.stories_id) post_dated_stories, sb.stories_id ref_stories_id, 
-        sb.url ref_url, sb.publish_date ref_publish_date 
-    from stories sa, stories sb, controversy_links_cross_media cl 
-    where sa.stories_id = cl.stories_id and sb.stories_id = cl.ref_stories_id and 
-        sa.publish_date < sb.publish_date - interval '1 day' and 
-        not ( sa.url like '%sopa.google.search%' ) and
-        cl.controversies_id = $controversy->{ controversies_id }
-    order by post_dated_stories desc, sb.stories_id, sa.publish_date;
-END
-
-}
-
-# dump counts of distinct url domains for the last 1000 stories for each media source in the controversy
-sub write_media_domains_dump
-{
-    my ( $db, $controversy ) = @_;
-
-    my $res = $db->query( <<END );
-select m.* from media m
-    where m.media_id in 
-        ( select s.media_id from stories s, controversy_stories cs
-              where s.stories_id = cs.stories_id and 
-                  cs.controversies_id = $controversy->{ controversies_id } )
-    order by m.media_id
-END
-
-    my $media_fields = $res->columns;
-    my $media        = $res->hashes;
-
-    print STDERR "generating media domains ...\n";
-
-    my $num_media = scalar( @{ $media } );
-    my $i         = 0;
-    for my $medium ( @{ $media } )
-    {
-        print STDERR "[ $i / $num_media ]\n" unless ( ++$i % 100 );
-
-        my $domain_map = MediaWords::DBI::Media::get_medium_domain_counts( $db, $medium );
-
-        $medium->{ num_domains } = scalar( values( %{ $domain_map } ) );
-
-        my $domain_counts = [];
-        while ( my ( $domain, $count ) = each( %{ $domain_map } ) )
-        {
-            push( @{ $domain_counts }, "[ $domain $count ]" );
-        }
-
-        $medium->{ domain_counts } = join( " ", @{ $domain_counts } );
-
-    }
-
-    my $fields = [ shift( @{ $media_fields } ), ( 'num_domains', 'domain_counts' ), @{ $media_fields } ];
-    my $csv_string = MediaWords::Util::CSV::get_hashes_as_encoded_csv( $media, $fields );
-
-    write_dump_file( $controversy, 'controversy_media_domains', 'csv', $csv_string );
-}
-
-# generate list of all stories with duplicate titles, sorted by title
-sub write_dup_stories_dump
-{
-    my ( $db, $controversy ) = @_;
-
-    write_dump_as_csv( $db, $controversy, 'controversy_dup_stories_dump', <<END );
-select sa.title, sa.stories_id stories_id_a, sa.publish_date publish_date_a, sa.url story_url_a,
-        sa.media_id media_id_a, ma.url media_url_a, ma.name media_name_a,
-        sb.stories_id stories_id_b, sb.publish_date publish_date_b, sb.url story_url_b,
-        sb.media_id media_id_b, mb.url media_url_b, mb.name media_name_b
-    from controversy_stories csa, stories sa, media ma,
-        controversy_stories csb, stories sb, media mb
-    where csa.controversies_id = $controversy->{ controversies_id } and 
-        csa.stories_id = sa.stories_id and sa.media_id = ma.media_id and
-        csb.controversies_id = csa.controversies_id and 
-        csb.stories_id = sb.stories_id and sb.media_id = mb.media_id and
-        sa.stories_id > sb.stories_id and sa.title = sb.title and
-        length( sa.title ) > 16
-    order by sa.title, sa.stories_id, sb.stories_id        
-END
-}
-
 sub create_controversy_dump_time_slice ($$$$$$)
 {
     my ( $db, $cd, $start_date, $end_date, $period, $tag ) = @_;
@@ -1247,20 +1144,6 @@ END
 
     return ( $start_date, $end_date );
 
-}
-
-# write various dumps useful for cleaning up the dataset.  some of these take quite
-# a while to run, so we only want to generate them if needed
-sub write_cleanup_dumps
-{
-    my ( $db, $controversy ) = @_;
-
-    set_dump_label( 'cleanup' );
-
-    write_post_dated_links_dump( $db, $controversy );
-    write_post_dated_stories_dump( $db, $controversy );
-    write_media_domains_dump( $db, $controversy );
-    write_dup_stories_dump( $db, $controversy );
 }
 
 # create temporary table copies of temporary tables so that we can copy
@@ -1586,8 +1469,6 @@ sub dump_controversy ($$)
     write_date_counts_dump( $db, $cd, 'weekly' );
 
     analyze_snapshot_tables( $db );
-
-    # write_cleanup_dumps( $db, $controversy ) if ( $cleanup_data );
 }
 
 1;
