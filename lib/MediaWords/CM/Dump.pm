@@ -979,14 +979,6 @@ END
     create_cdts_file( $db, $cdts, 'media.gexf', encode( 'utf8', $layout_gexf ) );
 }
 
-# return true if there are any stories in the current controversy_stories_dump_ table
-sub stories_exist_for_period
-{
-    my ( $db, $controversy ) = @_;
-
-    return $db->query( "select 1 from dump_period_stories" )->hash;
-}
-
 # dump csv of all links from one story to another in the given story's future
 sub write_post_dated_links_dump
 {
