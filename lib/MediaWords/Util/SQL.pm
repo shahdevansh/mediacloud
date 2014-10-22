@@ -1,10 +1,12 @@
 package MediaWords::Util::SQL;
-use Modern::Perl "2013";
-use MediaWords::CommonLibs;
 
 # misc utility functions for sql
 
 use strict;
+use warnings;
+
+use Modern::Perl "2013";
+use MediaWords::CommonLibs;
 
 use DateTime;
 use Time::Local;
@@ -57,6 +59,33 @@ sub increment_day
     my ( undef, undef, undef, $day, $month, $year ) = localtime( $epoch_date );
 
     return sprintf( '%04d-%02d-%02d', $year + 1900, $month + 1, $day );
+}
+
+# decrease the given date to the latest monday equal to or before the date
+sub truncate_to_monday($)
+{
+    my ( $date ) = @_;
+
+    my $epoch_date = get_epoch_from_sql_date( $date );
+    my $week_day   = ( localtime( $epoch_date ) )[ 6 ];
+
+    # mod this to account for sunday, for which $week_day - 1 == -1
+    my $days_offset = ( $week_day - 1 ) % 7;
+
+    return increment_day( $date, -1 * $days_offset );
+}
+
+# decrease the given date to the first day of the current month
+sub truncate_to_start_of_month($)
+{
+    my ( $date ) = @_;
+
+    my $epoch_date = get_epoch_from_sql_date( $date );
+    my $month_day  = ( localtime( $epoch_date ) )[ 3 ];
+
+    my $days_offset = $month_day - 1;
+
+    return increment_day( $date, -1 * $days_offset );
 }
 
 1;

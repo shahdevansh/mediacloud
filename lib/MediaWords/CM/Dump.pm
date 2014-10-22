@@ -1170,33 +1170,6 @@ sub generate_cdts ($$$$$$)
     write_gexf_dump( $db, $cdts );
 }
 
-# decrease the given date to the latest monday equal to or before the date
-sub truncate_to_monday ($)
-{
-    my ( $date ) = @_;
-
-    my $epoch_date = MediaWords::Util::SQL::get_epoch_from_sql_date( $date );
-    my $week_day   = ( localtime( $epoch_date ) )[ 6 ];
-
-    # mod this to account for sunday, for which $week_day - 1 == -1
-    my $days_offset = ( $week_day - 1 ) % 7;
-
-    return MediaWords::Util::SQL::increment_day( $date, -1 * $days_offset );
-}
-
-# decrease the given date to the first day of the current month
-sub truncate_to_start_of_month ($)
-{
-    my ( $date ) = @_;
-
-    my $epoch_date = MediaWords::Util::SQL::get_epoch_from_sql_date( $date );
-    my $month_day  = ( localtime( $epoch_date ) )[ 3 ];
-
-    my $days_offset = $month_day - 1;
-
-    return MediaWords::Util::SQL::increment_day( $date, -1 * $days_offset );
-}
-
 # generate dumps for the periods in controversy_dates
 sub generate_custom_period_dump ($$$ )
 {
@@ -1228,7 +1201,7 @@ sub generate_period_dump ($$$$)
     }
     elsif ( $period eq 'weekly' )
     {
-        my $w_start_date = truncate_to_monday( $start_date );
+        my $w_start_date = MediaWords::Util::SQL::truncate_to_monday( $start_date );
         while ( $w_start_date lt $end_date )
         {
             my $w_end_date = MediaWords::Util::SQL::increment_day( $w_start_date, 7 );
@@ -1240,11 +1213,11 @@ sub generate_period_dump ($$$$)
     }
     elsif ( $period eq 'monthly' )
     {
-        my $m_start_date = truncate_to_start_of_month( $start_date );
+        my $m_start_date = MediaWords::Util::SQL::truncate_to_start_of_month( $start_date );
         while ( $m_start_date lt $end_date )
         {
             my $m_end_date = MediaWords::Util::SQL::increment_day( $m_start_date, 32 );
-            $m_end_date = truncate_to_start_of_month( $m_end_date );
+            $m_end_date = MediaWords::Util::SQL::truncate_to_start_of_month( $m_end_date );
 
             generate_cdts( $db, $cd, $m_start_date, $m_end_date, $period, $tag );
 
