@@ -182,12 +182,12 @@ END
         $db->query( <<END );
 create or replace temporary view dump_undateable_stories as
     select distinct s.stories_id
-        from dump_stories s, dump_stories_tags_map stm, dump_tags t, dump_tag_sets ts
-        where s.stories_id = stm.stories_id and
-            stm.tags_id = t.tags_id and
-            t.tag_sets_id = ts.tag_sets_id and
-            ts.name = 'date_invalid' and
-            t.tag = 'undateable'
+    from dump_stories s, dump_stories_tags_map stm, dump_tags t, dump_tag_sets ts
+    where s.stories_id = stm.stories_id and
+        stm.tags_id = t.tags_id and
+        t.tag_sets_id = ts.tag_sets_id and
+        ts.name = 'date_invalid' and
+        t.tag = 'undateable'
 END
 
         $db->query( <<"END", $cdts->{ start_date }, $cdts->{ end_date } );
