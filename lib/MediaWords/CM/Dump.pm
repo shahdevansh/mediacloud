@@ -77,11 +77,9 @@ sub _write_live_dump_tables
     }
 
     _write_temporary_dump_tables( $db, $controversies_id );
-    _write_period_stories( $db, $cdts );
-    _write_story_link_counts_dump( $db, $cdts, 1 );
-    _write_story_links_dump( $db, $cdts, 1 );
-    _write_medium_link_counts_dump( $db, $cdts, 1 );
-    _write_medium_links_dump( $db, $cdts, 1 );
+
+    Readonly my $is_model => 1;
+    generate_cdts_data( $db, $cdts, $is_model );
 }
 
 # create temporary view of all the dump_* tables that call into the cd.* tables.
