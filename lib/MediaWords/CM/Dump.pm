@@ -191,24 +191,27 @@ create or replace temporary view dump_undateable_stories as
 END
 
         $db->query( <<"END", $cdts->{ start_date }, $cdts->{ end_date } );
-create temporary table dump_period_stories $_temporary_tablespace as
-    select distinct s.stories_id
-        from dump_stories s
-            left join dump_controversy_links_cross_media cl on ( cl.ref_stories_id = s.stories_id )
-            left join dump_stories ss on ( cl.stories_id = ss.stories_id )
-        WHERE
-        
-            -- restrict the dump_period_stories creation
-            -- to only stories within the cdts time frame
-            (
-                s.publish_date BETWEEN \$1::timestamp AND \$2::timestamp - INTERVAL '1 second' 
-                AND
-                s.stories_id NOT IN ( SELECT stories_id FROM dump_undateable_stories )
-            ) OR (
-                ss.publish_date BETWEEN \$1::timestamp AND \$2::timestamp - INTERVAL '1 second'
-                AND
-                ss.stories_id NOT IN ( SELECT stories_id FROM dump_undateable_stories )
-            )
+CREATE TEMPORARY TABLE dump_period_stories $_temporary_tablespace AS
+
+    SELECT DISTINCT dump_stories.stories_id
+    FROM dump_stories
+        LEFT JOIN dump_controversy_links_cross_media
+            on dump_controversy_links_cross_media.ref_stories_id = dump_stories.stories_id
+        LEFT JOIN dump_stories AS dump_stories_cross_media
+            ON dump_controversy_links_cross_media.stories_id = dump_stories_cross_media.stories_id
+    WHERE
+
+        -- restrict the dump_period_stories creation
+        -- to only stories within the cdts time frame
+        (
+            dump_stories.publish_date BETWEEN \$1::timestamp AND \$2::timestamp - INTERVAL '1 second' 
+            AND
+            dump_stories.stories_id NOT IN ( SELECT stories_id FROM dump_undateable_stories )
+        ) OR (
+            dump_stories_cross_media.publish_date BETWEEN \$1::timestamp AND \$2::timestamp - INTERVAL '1 second'
+            AND
+            dump_stories_cross_media.stories_id NOT IN ( SELECT stories_id FROM dump_undateable_stories )
+        )
 END
 
         $db->query( "drop view dump_undateable_stories" );
