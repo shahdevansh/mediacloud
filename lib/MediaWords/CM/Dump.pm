@@ -378,7 +378,7 @@ create temporary table dump_story_link_counts $_temporary_tablespace as
     select distinct ps.stories_id, 
             coalesce( ilc.inlink_count, 0 ) inlink_count, 
             coalesce( olc.outlink_count, 0 ) outlink_count,
-            bsc.click_count as bitly_click_count,
+            dump_story_bitly_click_counts.click_count as bitly_click_count,
             bsr.referrer_count as bitly_referrer_count
         from dump_period_stories ps
             left join 
@@ -397,14 +397,8 @@ create temporary table dump_story_link_counts $_temporary_tablespace as
                   where cl.ref_stories_id = ps.stories_id
                   group by cl.stories_id
                 ) olc on ( ps.stories_id = olc.stories_id )
-            left join
-                ( select bitly_story_clicks.stories_id,
-                         sum( bitly_story_clicks.click_count ) as click_count
-                  from bitly_story_clicks,
-                       dump_period_stories ps
-                  where bitly_story_clicks.stories_id = ps.stories_id
-                  group by bitly_story_clicks.stories_id
-                ) as bsc on ( ps.stories_id = bsc.stories_id )
+            left join dump_story_bitly_click_counts
+                on ps.stories_id = dump_story_bitly_click_counts.stories_id
             left join
                 ( select bitly_story_referrers.stories_id,
                          sum( bitly_story_referrers.referrer_count ) as referrer_count
@@ -420,6 +414,45 @@ END
         _create_cdts_snapshot( $db, $cdts, 'story_link_counts' );
         _write_stories_csv( $db, $cdts );
     }
+}
+
+# Write "dump_story_bitly_click_counts" table which will contain sums of Bit.ly
+# click counts for each story (limited by the time slice date period)
+sub _write_story_bitly_click_counts_dump($$)
+{
+    my ( $db, $cdts ) = @_;
+
+    $db->query( 'DROP TABLE IF EXISTS dump_story_bitly_click_counts' );
+
+    my $click_date_clause;
+    my @bind_values;
+    if ( !$cdts || ( !$cdts->{ tags_id } && ( $cdts->{ period } eq 'overall' ) ) )
+    {
+        # say STDERR "*Not* limiting Bit.ly click period by date";
+        $click_date_clause = '1=1';
+        @bind_values       = ();
+    }
+    else
+    {
+        # say STDERR "Limiting Bit.ly click period from " . $cdts->{ start_date } . " to " . $cdts->{ end_date };
+        $click_date_clause = 'bitly_story_daily_clicks.click_date BETWEEN $1::timestamp AND $2::timestamp';
+        @bind_values = ( $cdts->{ start_date }, $cdts->{ end_date } );
+    }
+
+    my $sth = $db->dbh->prepare(
+        <<"EOF"
+        CREATE TEMPORARY TABLE dump_story_bitly_click_counts $_temporary_tablespace AS
+            SELECT dump_stories.stories_id,
+                   SUM(bitly_story_daily_clicks.click_count) AS click_count
+            FROM dump_stories
+                LEFT JOIN bitly_story_daily_clicks
+                    ON dump_stories.stories_id = bitly_story_daily_clicks.stories_id
+            WHERE $click_date_clause
+            GROUP BY dump_stories.stories_id
+            ORDER BY dump_stories.stories_id
+EOF
+    );
+    $sth->execute( @bind_values ) or die "Unable to create Bit.ly click counts table: " . $sth->errstr;
 }
 
 sub _add_tags_to_dump_media
@@ -999,6 +1032,11 @@ sub generate_cdts_data ($$;$)
     my ( $db, $cdts, $is_model ) = @_;
 
     _write_period_stories( $db, $cdts );
+
+    # Bit.ly click counts depend on "dump_period_stories" table (initialized in
+    # the previous call) and will be used by the "link_counts" subroutines that
+    # get called below
+    _write_story_bitly_click_counts_dump( $db, $cdts );
 
     _write_story_link_counts_dump( $db, $cdts, $is_model );
     _write_story_links_dump( $db, $cdts, $is_model );
