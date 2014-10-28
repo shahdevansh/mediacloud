@@ -291,8 +291,8 @@ RETURNS TABLE (
              ) AS generated_days
             LEFT JOIN bitly_story_daily_clicks
                 ON generated_days.day = bitly_story_daily_clicks.click_date
-               AND stories_id = param_stories_id
-        WHERE stories_id IS NULL
+               AND bitly_story_daily_clicks.stories_id = param_stories_id
+        WHERE bitly_story_daily_clicks.stories_id IS NULL
         ORDER BY day
     )
 
