@@ -1833,57 +1833,6 @@ END;
 $$
 LANGUAGE plpgsql;
 
--- Returns date ranges for which we don't have Bit.ly story click data
-CREATE FUNCTION bitly_date_ranges_without_story_clicks (
-    param_stories_id INT,
-    param_start_date DATE,
-    param_end_date DATE
-)
-RETURNS TABLE (
-    stories_id INT,
-    uncovered_start_date DATE,
-    uncovered_end_date DATE
-) AS $$
-
-    WITH uncovered_dates AS (
-
-        -- Select only the days for which there is no record in the
-        -- "bitly_story_daily_clicks" table
-        SELECT day AS uncovered_date
-        FROM (
-
-                -- Generate a list of all days between two dates
-                SELECT date_trunc('day', days_between_dates)::date AS day
-                FROM generate_series (
-                    param_start_date::timestamp,
-                    param_end_date::timestamp,
-                    '1 day'::interval
-                ) AS days_between_dates
-
-             ) AS generated_days
-            LEFT JOIN bitly_story_daily_clicks
-                ON generated_days.day = bitly_story_daily_clicks.click_date
-               AND stories_id = param_stories_id
-        WHERE stories_id IS NULL
-        ORDER BY day
-    )
-
-    -- Generate date ranges from a list of sorted dates, similar to how it's
-    -- done in the "bitly_story_clicks" view
-    SELECT param_stories_id AS stories_id,
-           MIN(uncovered_date) AS uncovered_start_date,
-           MAX(uncovered_date) AS uncovered_end_date
-    FROM (
-            SELECT uncovered_date,
-                   uncovered_date - ROW_NUMBER() OVER (ORDER BY uncovered_date)::int AS grp
-            FROM uncovered_dates
-         ) AS subquery
-    GROUP BY grp
-    ORDER BY grp
-
-$$
-LANGUAGE SQL;
-
 
 -- Bit.ly referrer statistics for stories
 CREATE TABLE bitly_story_referrers (
@@ -1933,61 +1882,6 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
-
--- Returns date ranges for which we don't have Bit.ly story referrer data
-CREATE FUNCTION bitly_date_ranges_without_story_referrers (
-    param_stories_id INT,
-    param_start_date DATE,
-    param_end_date DATE
-)
-RETURNS TABLE (
-    stories_id INT,
-    uncovered_start_date DATE,
-    uncovered_end_date DATE
-) AS $$
-
-    WITH uncovered_dates AS (
-
-        -- Select only the days for which there is no record in the
-        -- "bitly_story_referrers" table
-        SELECT day AS uncovered_date
-        FROM (
-
-                -- Generate a list of all days between two dates
-                SELECT date_trunc('day', days_between_dates)::date AS day
-                FROM generate_series (
-                    param_start_date::timestamp,
-                    param_end_date::timestamp,
-                    '1 day'::interval
-                ) AS days_between_dates
-
-             ) AS generated_days
-            LEFT JOIN bitly_story_referrers
-                ON (
-                    generated_days.day
-                    BETWEEN bitly_story_referrers.referrer_start_date
-                        AND bitly_story_referrers.referrer_end_date
-                )
-                AND stories_id = param_stories_id
-        WHERE stories_id IS NULL
-        ORDER BY day
-    )
-
-    -- Generate date ranges from a list of sorted dates, similar to how it's
-    -- done in the "bitly_story_clicks" view
-    SELECT param_stories_id AS stories_id,
-           MIN(uncovered_date) AS uncovered_start_date,
-           MAX(uncovered_date) AS uncovered_end_date
-    FROM (
-            SELECT uncovered_date,
-                   uncovered_date - ROW_NUMBER() OVER (ORDER BY uncovered_date)::int AS grp
-            FROM uncovered_dates
-         ) AS subquery
-    GROUP BY grp
-    ORDER BY grp
-
-$$
-LANGUAGE SQL;
 
 
 -- Bit.ly stories that have gone through the processing chain
@@ -2062,6 +1956,63 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
+
+
+-- Returns date ranges for which we don't have Bit.ly data (clicks or
+-- referrers)
+--
+-- We're assuming in the function that if there's no click data, then there's
+-- no referrer data either (as both click and referrer data are being fetched
+-- together), so we're testing only the "clicks" data.
+CREATE FUNCTION bitly_date_ranges_without_data (
+    param_stories_id INT,
+    param_start_date DATE,
+    param_end_date DATE
+)
+RETURNS TABLE (
+    stories_id INT,
+    uncovered_start_date DATE,
+    uncovered_end_date DATE
+) AS $$
+
+    WITH uncovered_dates AS (
+
+        -- Select only the days for which there is no record in the
+        -- "bitly_story_daily_clicks" table
+        SELECT day AS uncovered_date
+        FROM (
+
+                -- Generate a list of all days between two dates
+                SELECT date_trunc('day', days_between_dates)::date AS day
+                FROM generate_series (
+                    param_start_date::timestamp,
+                    param_end_date::timestamp,
+                    '1 day'::interval
+                ) AS days_between_dates
+
+             ) AS generated_days
+            LEFT JOIN bitly_story_daily_clicks
+                ON generated_days.day = bitly_story_daily_clicks.click_date
+               AND stories_id = param_stories_id
+        WHERE stories_id IS NULL
+        ORDER BY day
+    )
+
+    -- Generate date ranges from a list of sorted dates, similar to how it's
+    -- done in the "bitly_story_clicks" view
+    SELECT param_stories_id AS stories_id,
+           MIN(uncovered_date) AS uncovered_start_date,
+           MAX(uncovered_date) AS uncovered_end_date
+    FROM (
+            SELECT uncovered_date,
+                   uncovered_date - ROW_NUMBER() OVER (ORDER BY uncovered_date)::int AS grp
+            FROM uncovered_dates
+         ) AS subquery
+    GROUP BY grp
+    ORDER BY grp
+
+$$
+LANGUAGE SQL;
 
 
 create table cd.controversy_stories (
