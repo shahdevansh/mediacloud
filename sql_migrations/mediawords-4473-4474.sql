@@ -182,6 +182,45 @@ END;
 $$
 LANGUAGE plpgsql;
 
+
+-- Helper to check whether a story is enabled for Bit.ly processing
+CREATE FUNCTION bitly_story_is_enabled_for_processing (param_stories_id INT) RETURNS BOOLEAN AS
+$$
+BEGIN
+
+    -- Check if story exists
+    IF NOT EXISTS (
+
+        SELECT 1
+        FROM stories
+        WHERE stories.stories_id = param_stories_id
+
+    ) THEN
+        RAISE EXCEPTION 'Story % does not exist.', param_stories_id;
+        RETURN FALSE;
+    END IF;
+
+    -- Check "controversies.process_with_bitly"
+    IF NOT EXISTS (
+
+        SELECT 1 AS story_is_enabled_for_bitly_processing
+        FROM controversy_stories
+            INNER JOIN controversies ON controversy_stories.controversies_id = controversies.controversies_id
+        WHERE controversy_stories.stories_id = param_stories_id
+          AND controversies.process_with_bitly = 't'
+
+    ) THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Things are fine
+    RETURN TRUE;
+
+END;
+$$
+LANGUAGE plpgsql;
+
+
 -- Helper to return a number of stories for which we don't have Bit.ly statistics yet
 CREATE FUNCTION num_controversy_stories_without_bitly_statistics (param_controversies_id INT) RETURNS INT AS
 $$

@@ -1017,24 +1017,18 @@ sub story_is_enabled_for_processing($$)
         die "Bit.ly processing is not enabled.";
     }
 
-    my $story = $db->query(
+    my ( $bitly_story_is_enabled_for_processing ) = $db->query(
         <<EOF,
-        SELECT 1 AS story_is_enabled_for_bitly_processing
-        FROM controversy_stories
-            INNER JOIN controversies ON controversy_stories.controversies_id = controversies.controversies_id
-        WHERE stories_id = ?
-          AND controversies.process_with_bitly = 't';
+        SELECT bitly_story_is_enabled_for_processing(?)
 EOF
         $stories_id
-    )->hash;
-    if ( $story->{ story_is_enabled_for_bitly_processing } )
+    )->flat;
+    unless ( defined $bitly_story_is_enabled_for_processing )
     {
-        return 1;
+        die "'bitly_story_is_enabled_for_processing' is undefined.";
     }
-    else
-    {
-        return 0;
-    }
+
+    return $bitly_story_is_enabled_for_processing;
 }
 
 # Check if story is processed with Bit.ly (stats are fetched)
