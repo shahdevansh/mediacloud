@@ -272,7 +272,26 @@ RETURNS TABLE (
     uncovered_start_date DATE,
     uncovered_end_date DATE
 ) AS $$
+DECLARE
+    story_is_enabled_for_processing BOOL;
+BEGIN
 
+    SELECT bitly_story_is_enabled_for_processing( param_stories_id ) INTO story_is_enabled_for_processing;
+    IF story_is_enabled_for_processing = 'f' THEN
+        RAISE EXCEPTION 'Story % is not enabled for Bit.ly processing.', param_stories_id;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM bitly_processed_stories
+        WHERE bitly_processed_stories.stories_id = param_stories_id
+    ) THEN
+        RAISE NOTICE 'Story % is not processed with Bit.ly at all, '
+                     'so the whole date range is assumed to have no data.', param_stories_id;
+        RETURN QUERY SELECT param_stories_id, param_start_date, param_end_date;
+    END IF;
+
+    RETURN QUERY
     WITH uncovered_dates AS (
 
         -- Select only the days for which there is no record in the
@@ -307,10 +326,11 @@ RETURNS TABLE (
             FROM uncovered_dates
          ) AS subquery
     GROUP BY grp
-    ORDER BY grp
+    ORDER BY grp;
 
+END;
 $$
-LANGUAGE SQL;
+LANGUAGE plpgsql;
 
 
 CREATE OR REPLACE FUNCTION set_database_schema_version() RETURNS boolean AS $$
