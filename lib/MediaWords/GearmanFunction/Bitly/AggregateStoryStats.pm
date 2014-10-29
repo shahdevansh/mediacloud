@@ -115,8 +115,8 @@ sub run($;$)
             {
                 if ( MediaWords::Util::URL::is_homepage_url( $url ) )
                 {
-                    say STDERR
-                      "URL $stories_original_url got redirected to $url which looks like a homepage, so I'm skipping that.";
+                    say STDERR "URL $stories_original_url got redirected to $url which " .
+                      "looks like a homepage, so I'm skipping that.";
                     next;
                 }
             }
@@ -150,32 +150,33 @@ sub run($;$)
             {
                 unless ( defined $bitly_referrers->{ 'unit_reference_ts' } )
                 {
-                    die
-"Bit.ly stats hashref doesn't have 'referrers/unit_reference_ts' key for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref doesn't have 'referrers/unit_reference_ts' key " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
                 unless ( defined $bitly_referrers->{ 'unit' } )
                 {
-                    die "Bit.ly stats hashref doesn't have 'referrers/unit' key for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref doesn't have 'referrers/unit' key " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
                 unless ( defined $bitly_referrers->{ 'units' } )
                 {
-                    die
-                      "Bit.ly stats hashref doesn't have 'referrers/units' key for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref doesn't have 'referrers/units' key " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
                 unless ( defined $bitly_referrers->{ 'tz_offset' } )
                 {
-                    die
-"Bit.ly stats hashref doesn't have 'referrers/tz_offset' key for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref doesn't have 'referrers/tz_offset' key " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
                 unless ( $bitly_referrers->{ 'unit' } eq 'day' )
                 {
-                    die
-"Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
                 unless ( $bitly_referrers->{ 'tz_offset' } == 0 )
                 {
-                    die
-"Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' for Bit.ly ID $bitly_id, story $stories_id.";
+                    die "Bit.ly stats hashref's 'referrers/unit' is not equal to 'day' " .
+                      "for Bit.ly ID $bitly_id, story $stories_id.";
                 }
 
                 my $referrer_end_timestamp = $bitly_referrers->{ 'unit_reference_ts' };

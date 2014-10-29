@@ -74,7 +74,8 @@ sub run($;$)
 
     unless ( $controversy->{ process_with_bitly } )
     {
-        die "Controversy $controversies_id is not set up for Bit.ly processing; please set controversies.process_with_bitly";
+        die "Controversy $controversies_id is not set up for Bit.ly processing; " .
+          "please set controversies.process_with_bitly";
     }
 
     say STDERR "Fetching controversy's $controversies_id start and end timestamps...";
@@ -102,8 +103,8 @@ EOF
     my $now = time();
     if ( $start_timestamp > $now )
     {
-        say STDERR
-"Start timestamp $start_timestamp is bigger than current timestamp $now, so worker will use current timestamp as start date.";
+        say STDERR "Start timestamp $start_timestamp is bigger than current timestamp $now, " .
+          "so worker will use current timestamp as start date.";
         $start_timestamp = undef;
     }
     else
@@ -113,8 +114,8 @@ EOF
 
     if ( $end_timestamp > $now )
     {
-        say STDERR
-"End timestamp $end_timestamp is bigger than current timestamp $now, so worker will use current timestamp as end date.";
+        say STDERR "End timestamp $end_timestamp is bigger than current timestamp $now, " .
+          "so worker will use current timestamp as end date.";
         $end_timestamp = undef;
     }
     else
@@ -147,7 +148,8 @@ EOF
 EOF
             $offset_controversy_stories_id, $controversies_id, $CHUNK_SIZE
         )->hashes;
-        say STDERR "Done fetching chunk of stories with 'controversy_stories_id' offset $offset_controversy_stories_id.";
+        say STDERR "Done fetching chunk of stories with 'controversy_stories_id' " .
+          "offset $offset_controversy_stories_id.";
 
         say STDERR "Number of stories in a chunk: " . scalar( @{ $stories } );
 
