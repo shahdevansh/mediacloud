@@ -1302,7 +1302,7 @@ sub write_story_stats($$$)
     # Check if something is already stored
     if ( story_stats_are_fetched( $db, $stories_id ) )
     {
-        warn "Story's $stories_id stats are already fetched from Bit.ly, so I will overwrite it.";
+        say STDERR "Story's $stories_id stats are already fetched from Bit.ly, so I will overwrite it.";
     }
 
     # Convert results to a minimized JSON
