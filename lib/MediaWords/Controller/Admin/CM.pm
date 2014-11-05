@@ -2863,6 +2863,11 @@ sub enqueue_stories_for_bitly : Local
         die "Controversy $controversies_id is not set up for Bit.ly processing; please set controversies.process_with_bitly";
     }
 
+    if ( MediaWords::Util::Bitly::num_controversy_stories_without_bitly_statistics( $db, $controversies_id ) == 0 )
+    {
+        die "All stories in the controversy $controversies_id are already processed with Bit.ly";
+    }
+
     my $args = { controversies_id => $controversies_id };
     my $gearman_job_id = MediaWords::GearmanFunction::Bitly::EnqueueControversyStories->enqueue_on_gearman( $args );
     unless ( $gearman_job_id )
