@@ -118,7 +118,8 @@ sub edit : Local
     {
         my $p = $form->params;
 
-        _add_controversy_date( $db, $controversy, $p->{ start_date }, $p->{ end_date }, 1 );
+        Readonly my $BOUNDARY => 1;
+        _add_controversy_date( $db, $controversy, $p->{ start_date }, $p->{ end_date }, $BOUNDARY );
 
         delete( $p->{ start_date } );
         delete( $p->{ end_date } );
