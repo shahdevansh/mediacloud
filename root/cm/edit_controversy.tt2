@@ -4,4 +4,11 @@
 [% form.render %]
 </fieldset>
 
+<p>
+    Please note that if you increase controversy's date range (by setting
+    controversy's <em>Start Date</em> to an earlier date, setting controversy's
+    <em>End Date</em> to a later date, or both), Bit.ly statistics for that
+    controversy will be refetched afterwards.
+</p>
+
 [% INCLUDE include/footer.tt2 %]
