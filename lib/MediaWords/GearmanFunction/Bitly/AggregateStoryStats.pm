@@ -254,6 +254,18 @@ sub unify_logs()
     return 1;
 }
 
+# Returns true if two or more jobs with the same parameters can not be run at
+# the same and instead should be merged into one.
+sub unique()
+{
+    # If the "AggregateStoryStats" job is already waiting in the queue for a
+    # given story, a new one has to be enqueued right after it in order to
+    # update data with new controversy's start / end dates.
+    #
+    # Thus, the worker is *NOT* unique.
+    return 0;
+}
+
 # (Gearman::JobScheduler::AbstractFunction implementation) Return default configuration
 sub configuration()
 {
