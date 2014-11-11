@@ -127,6 +127,7 @@ programs = gearmand
     default_autorestart='true'
     default_autostart='true'
     default_nice=10
+    skip_numprocs=1
 %]
 
 [% INCLUDE program_config
@@ -135,6 +136,7 @@ programs = gearmand
     default_autorestart='true'
     default_autostart='true'
     default_nice=10
+    skip_numprocs=1
 %]
 
 [% INCLUDE program_config
@@ -143,6 +145,7 @@ programs = gearmand
     default_autorestart='true'
     default_autostart='true'
     default_nice=10
+    skip_numprocs=1
 %]
 
 [group:solr]
