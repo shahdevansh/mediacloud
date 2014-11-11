@@ -20,6 +20,7 @@ use MediaWords::DBI::Stories;
 use MediaWords::Solr;
 use MediaWords::Solr::WordCounts;
 use MediaWords::Util::Bitly;
+use MediaWords::Util::SQL;
 use MediaWords::GearmanFunction::Bitly::EnqueueControversyStories;
 
 use constant ROWS_PER_PAGE => 25;
@@ -121,6 +122,11 @@ sub edit : Local
         Readonly my $BOUNDARY => 1;
         _add_controversy_date( $db, $controversy, $p->{ start_date }, $p->{ end_date }, $BOUNDARY );
 
+        my $existing_start_timestamp = MediaWords::Util::SQL::get_epoch_from_sql_date( $controversy->{ start_date } );
+        my $new_start_timestamp      = MediaWords::Util::SQL::get_epoch_from_sql_date( $p->{ start_date } );
+        my $existing_end_timestamp   = MediaWords::Util::SQL::get_epoch_from_sql_date( $controversy->{ end_date } );
+        my $new_end_timestamp        = MediaWords::Util::SQL::get_epoch_from_sql_date( $p->{ end_date } );
+
         delete( $p->{ start_date } );
         delete( $p->{ end_date } );
         delete( $p->{ preview } );
@@ -130,7 +136,41 @@ sub edit : Local
 
         $c->dbis->update_by_id( 'controversies', $controversies_id, $p );
 
-        my $view_url = $c->uri_for( "/admin/cm/view/" . $controversies_id, { status_msg => 'Controversy updated.' } );
+        my $status_msg = 'Controversy updated.';
+
+        if ( $controversy->{ process_with_bitly } )
+        {
+
+            unless ( MediaWords::Util::Bitly::bitly_processing_is_enabled() )
+            {
+                die "Bit.ly processing is enabled for this controversy, but Bit.ly is not enabled in the configuration.";
+            }
+
+            # Controversy's date range increased?
+            if ( $new_start_timestamp < $existing_start_timestamp or $new_end_timestamp > $existing_end_timestamp )
+            {
+
+                # Re-enqueue all controversy's stories for Bit.ly processing,
+                # overwrite existing stats
+                #
+                # FIXME: this might run into a race condition if more than one
+                # Bit.ly worker is running at a time
+                my $args = {
+                    controversies_id => $controversies_id,
+                    overwrite        => 1
+                };
+                my $gearman_job_id =
+                  MediaWords::GearmanFunction::Bitly::EnqueueControversyStories->enqueue_on_gearman( $args );
+                unless ( $gearman_job_id )
+                {
+                    die "Gearman job didn't return a job ID for controversy ID $controversies_id";
+                }
+
+                $status_msg .= ' Additionally, Bit.ly data for the controversy has been enqueued for refetching.';
+            }
+        }
+
+        my $view_url = $c->uri_for( "/admin/cm/view/" . $controversies_id, { status_msg => $status_msg } );
         $c->res->redirect( $view_url );
 
         return;
