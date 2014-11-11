@@ -34,9 +34,24 @@ sub get_sql_date_from_epoch
 }
 
 # given a date in the sql format 'YYYY-MM-DD', return the epoch time
-sub get_epoch_from_sql_date
+sub get_epoch_from_sql_date($)
 {
-    my ( $date ) = @_;
+    my $date = shift;
+
+    unless ( $date )
+    {
+        die "Date is undefined or empty.";
+    }
+
+    unless ( length( $date ) == length( 'YYYY-MM-DD' ) )
+    {
+        die "Date is invalid: $date";
+    }
+
+    unless ( $date =~ /^\d\d\d\d-\d\d-\d\d$/ )
+    {
+        die "Date is invalid: $date";
+    }
 
     my $year  = substr( $date, 0, 4 );
     my $month = substr( $date, 5, 2 );
