@@ -29,6 +29,7 @@ use MediaWords::CommonLibs;
 
 use MediaWords::DB;
 use MediaWords::Util::Bitly;
+use MediaWords::Util::DateTime;
 use MediaWords::Util::Process;
 use MediaWords::Util::GearmanJobSchedulerConfiguration;
 use MediaWords::GearmanFunction::Bitly::AggregateStoryStats;
@@ -65,21 +66,54 @@ sub run($;$)
     # Postpone connecting to the database so that compile test doesn't do that
     $db ||= MediaWords::DB::connect_to_db();
 
-    my $stories_id      = $args->{ stories_id } or die "'stories_id' is not set.";
-    my $start_timestamp = $args->{ start_timestamp };
-    my $end_timestamp   = $args->{ end_timestamp };
+    my $stories_id = $args->{ stories_id } or die "'stories_id' is not set.";
+
+    # Fetching MIN(start_date) and MAX(start_date) for all controversies the
+    # story belongs to
+    say STDERR "Fetching story's $stories_id start and end timestamps...";
+    my $timestamps = $db->query(
+        <<EOF,
+        SELECT
+            controversy_stories.stories_id,
+            EXTRACT(EPOCH FROM MIN(controversy_dates.start_date)) AS start_timestamp,
+            EXTRACT(EPOCH FROM MAX(controversy_dates.end_date)) AS end_timestamp
+        FROM controversy_stories
+            INNER JOIN controversy_dates
+                ON controversy_stories.controversies_id = controversy_dates.controversies_id
+               AND controversy_dates.boundary = 't'
+        WHERE controversy_stories.stories_id = ?
+        GROUP BY controversy_stories.stories_id
+        ORDER BY controversy_stories.stories_id
+EOF
+        $stories_id
+    )->hash;
+    unless ( $timestamps )
+    {
+        die "Unable to fetch controversy's start and end timestamps.";
+    }
+    my $start_timestamp = $timestamps->{ start_timestamp };
+    my $end_timestamp   = $timestamps->{ end_timestamp };
 
     my $now = time();
-    unless ( $start_timestamp )
+    if ( $start_timestamp > $now )
     {
         say STDERR "Start timestamp is not set, so I will use current timestamp $now as start date.";
         $start_timestamp = $now;
     }
-    unless ( $end_timestamp )
+    if ( $end_timestamp > $now )
     {
         say STDERR "End timestamp is not set, so I will use current timestamp $now as end date.";
         $end_timestamp = $now;
     }
+    if ( $start_timestamp >= $end_timestamp )
+    {
+        die "Start timestamp ($start_timestamp) is bigger or equal to end timestamp ($end_timestamp).";
+    }
+
+    say STDERR "Start timestamp: " . gmt_date_string_from_timestamp( $start_timestamp );
+    say STDERR "End timestamp: " . gmt_date_string_from_timestamp( $end_timestamp );
+
+    say STDERR "Done fetching story's $stories_id start and end timestamps.";
 
     my $stats;
     my $retry = 0;
@@ -153,13 +187,11 @@ sub unify_logs()
 sub unique()
 {
     # If the "FetchStoryStats" job is already waiting in the queue for a given
-    # story and start / end timestamp, we can go ahead and do the fetching
-    # anyway. The new "FetchStoryStats" jobs for story (after the controversy
-    # date change) will be waiting after this job (because the start / end
-    # timestamp will be different).
+    # controversy, a new one has to be enqueued right after it in order to
+    # fetch story stats with updated start / end timestamps.
     #
-    # Thus, the worker remains unique.
-    return 1;
+    # Thus, the worker is *NOT* unique.
+    return 0;
 }
 
 # (Gearman::JobScheduler::AbstractFunction implementation) Return default configuration

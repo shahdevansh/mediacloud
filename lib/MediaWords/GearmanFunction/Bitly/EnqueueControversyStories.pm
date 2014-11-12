@@ -30,7 +30,6 @@ use MediaWords::CommonLibs;
 use MediaWords::DB;
 use MediaWords::Util::GearmanJobSchedulerConfiguration;
 use MediaWords::Util::Bitly;
-use MediaWords::Util::DateTime;
 use MediaWords::GearmanFunction::Bitly::FetchStoryStats;
 use Readonly;
 
@@ -77,54 +76,6 @@ sub run($;$)
         die "Controversy $controversies_id is not set up for Bit.ly processing; " .
           "please set controversies.process_with_bitly";
     }
-
-    say STDERR "Fetching controversy's $controversies_id start and end timestamps...";
-    my $timestamps = $db->query(
-        <<EOF,
-        SELECT EXTRACT(EPOCH FROM MIN( start_date )::timestamp) AS start_timestamp,
-               EXTRACT(EPOCH FROM MAX( end_date )::timestamp) AS end_timestamp
-        FROM controversies_with_dates
-        WHERE controversies_id = ?
-EOF
-        $controversies_id
-    )->hash;
-    unless ( $timestamps )
-    {
-        die "Unable to fetch controversy's start and end timestamps.";
-    }
-    my $start_timestamp = $timestamps->{ start_timestamp };
-    my $end_timestamp   = $timestamps->{ end_timestamp };
-
-    if ( $start_timestamp >= $end_timestamp )
-    {
-        die "Start timestamp ($start_timestamp) is bigger or equal to end timestamp ($end_timestamp).";
-    }
-
-    my $now = time();
-    if ( $start_timestamp > $now )
-    {
-        say STDERR "Start timestamp $start_timestamp is bigger than current timestamp $now, " .
-          "so worker will use current timestamp as start date.";
-        $start_timestamp = undef;
-    }
-    else
-    {
-        say STDERR "Start timestamp: " . gmt_date_string_from_timestamp( $start_timestamp );
-    }
-
-    if ( $end_timestamp > $now )
-    {
-        say STDERR "End timestamp $end_timestamp is bigger than current timestamp $now, " .
-          "so worker will use current timestamp as end date.";
-        $end_timestamp = undef;
-    }
-    else
-    {
-        say STDERR "End timestamp: " . gmt_date_string_from_timestamp( $end_timestamp );
-    }
-
-    say STDERR "Done fetching controversy's $controversies_id start and end timestamps.";
-
     say STDERR "Enqueueing controversy's $controversies_id stories for Bit.ly processing...";
 
     Readonly my $CHUNK_SIZE => 100;
@@ -180,12 +131,7 @@ EOF
 
             say STDERR "Enqueueing story $stories_id for Bit.ly processing...";
 
-            my $args = {
-                stories_id      => $stories_id,
-                start_timestamp => $start_timestamp,
-                end_timestamp   => $end_timestamp
-            };
-            MediaWords::GearmanFunction::Bitly::FetchStoryStats->enqueue_on_gearman( $args );
+            MediaWords::GearmanFunction::Bitly::FetchStoryStats->enqueue_on_gearman( { stories_id => $stories_id } );
 
             say STDERR "Done enqueueing story $stories_id for Bit.ly processing.";
         }
