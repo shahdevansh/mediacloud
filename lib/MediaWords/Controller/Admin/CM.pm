@@ -209,14 +209,13 @@ sub create : Local
 
     # At this point the form is submitted
 
-    my $c_name                = $c->req->params->{ name };
-    my $c_pattern             = $c->req->params->{ pattern };
-    my $c_solr_seed_query     = $c->req->params->{ solr_seed_query };
-    my $c_solr_seed_query_run = ( $c->req->params->{ solr_seed_query_run } ? 't' : 'f' );
-    my $c_description         = $c->req->params->{ description };
-    my $c_start_date          = $c->req->params->{ start_date };
-    my $c_end_date            = $c->req->params->{ end_date };
-    my $c_process_with_bitly  = ( $c->req->params->{ process_with_bitly } ? 't' : 'f' );
+    my $c_name               = $c->req->params->{ name };
+    my $c_pattern            = $c->req->params->{ pattern };
+    my $c_solr_seed_query    = $c->req->params->{ solr_seed_query };
+    my $c_description        = $c->req->params->{ description };
+    my $c_start_date         = $c->req->params->{ start_date };
+    my $c_end_date           = $c->req->params->{ end_date };
+    my $c_process_with_bitly = ( $c->req->params->{ process_with_bitly } ? 't' : 'f' );
 
     if ( $c->req->params->{ preview } )
     {
@@ -232,7 +231,7 @@ sub create : Local
             name                => $c_name,
             pattern             => $c_pattern,
             solr_seed_query     => $c_solr_seed_query,
-            solr_seed_query_run => $c_solr_seed_query_run,
+            solr_seed_query_run => 'f',
             description         => $c_description,
             process_with_bitly  => $c_process_with_bitly
         }
@@ -1525,6 +1524,9 @@ sub search_stories : Local
     my $query = $c->req->params->{ q };
     my $search_query = _get_stories_id_search_query( $db, $query );
 
+    my $order = $c->req->params->{ order };
+    my $order_clause = $order eq 'bitly_click_count' ? 'slc.bitly_click_count desc' : 'slc.inlink_count desc';
+
     my $stories = $db->query(
         <<"END"
         SELECT s.*,
@@ -1540,7 +1542,7 @@ sub search_stories : Local
         WHERE s.stories_id = slc.stories_id
           AND s.media_id = m.media_id
           AND s.stories_id IN ( $search_query )
-        ORDER BY slc.inlink_count DESC
+        ORDER BY $order_clause
 END
     )->hashes;
 
@@ -1643,6 +1645,9 @@ sub search_media : Local
     my $query = $c->req->param( 'q' );
     my $search_query = _get_stories_id_search_query( $db, $query );
 
+    my $order = $c->req->params->{ order };
+    my $order_clause = $order eq 'bitly_click_count' ? 'mlc.bitly_click_count desc' : 'mlc.inlink_count desc';
+
     my $media = $db->query(
         <<"END"
         SELECT DISTINCT m.*,
@@ -1659,7 +1664,7 @@ sub search_media : Local
           AND s.media_id = m.media_id
           AND s.media_id = mlc.media_id
           AND s.stories_id IN ( $search_query )
-        ORDER BY mlc.inlink_count DESC
+        ORDER BY $order_clause
 END
     )->hashes;
 
