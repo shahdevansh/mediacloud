@@ -8,6 +8,7 @@ use strict;
 
 use Carp;
 use Scalar::Defer;
+use Readonly;
 
 use MediaWords::Crawler::Extractor;
 use MediaWords::Util::Config qw(get_config);
@@ -194,67 +195,99 @@ sub _download_stores_for_writing($)
     return $stores;
 }
 
-# return true if the system is configured to override the given storage location with gridfs
-sub _override_store_with_gridfs
-{
-    my ( $location ) = @_;
-
-    if ( ( $location eq 'tar' ) and ( lc( get_config->{ mediawords }->{ read_tar_downloads_from_gridfs } eq 'yes' ) ) )
-    {
-        return 1;
-    }
-
-    if (    ( $location eq 'localfile' )
-        and ( lc( get_config->{ mediawords }->{ read_file_downloads_from_gridfs } eq 'yes' ) ) )
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
 # Returns store for fetching downloads from
 sub _download_store_for_reading($)
 {
     my $download = shift;
 
+    my $download_store;
+
     my $fetch_remote = get_config->{ mediawords }->{ fetch_remote_content } || 'no';
     if ( $fetch_remote eq 'yes' )
     {
-        return $_download_store_lookup->{ remote };
+        $download_store = 'remote';
     }
-
-    my $path = $download->{ path };
-    unless ( $path and ( $path =~ /^([\w]+):/ ) )
+    else
     {
-        say STDERR "Download path is not set or invalid for download $download->{ downloads_id }";
-        return undef;
+        my $path = $download->{ path };
+        unless ( $path and ( $path =~ /^([\w]+):/ ) )
+        {
+            die "Download path is not set or invalid for download $download->{ downloads_id }";
+        }
+
+        Readonly my $location => lc( $1 );
+
+        if ( $location eq 'content' )
+        {
+            $download_store = 'databaseinline';
+        }
+
+        elsif ( $location eq 'tar' )
+        {
+            $download_store = 'gridfs';
+        }
+
+        elsif ( $location eq 'postgresql' )
+        {
+            $download_store = 'postgresql';
+        }
+
+        elsif ( $location eq 'amazon_s3' )
+        {
+            $download_store = 'amazon_s3';
+        }
+
+        elsif ( $location eq 'gridfs' )
+        {
+            $download_store = 'gridfs';
+        }
+        else
+        {
+            # Assume it's stored in a filesystem
+            $download_store = 'localfile';
+        }
     }
 
-    my $location = lc( $1 );
-
-    if ( $location eq 'content' )
+    unless ( defined $download_store )
     {
-        return $_download_store_lookup->{ databaseinline };
+        die "Download store is undefined for download " . $download->{ downloads_id };
     }
 
-    if ( _override_store_with_gridfs( $location ) )
+    # Overrides:
+
+    # Tar downloads have to be fetched from GridFS?
+    if ( $download_store eq 'tar' )
     {
-        return $_download_store_lookup->{ gridfs };
+        if ( lc( get_config->{ mediawords }->{ read_tar_downloads_from_gridfs } eq 'yes' ) )
+        {
+            $download_store = 'gridfs';
+        }
     }
 
-    my $store = $_download_store_lookup->{ lc( $1 ) };
-    if ( $store )
+    # File downloads have to be fetched from GridFS?
+    if ( $download_store eq 'localfile' )
     {
-        return $store;
+        if ( lc( get_config->{ mediawords }->{ read_file_downloads_from_gridfs } eq 'yes' ) )
+        {
+            $download_store = 'gridfs';
+        }
     }
 
-    if ( _override_store_with_gridfs( 'localfile' ) )
+    # GridFS downloads have to be fetched from S3?
+    if ( $download_store eq 'gridfs' )
     {
-        return $_download_store_lookup->{ gridfs };
+        if ( lc( get_config->{ mediawords }->{ read_gridfs_downloads_from_s3 } eq 'yes' ) )
+        {
+            $download_store = 'amazon_s3';
+        }
     }
 
-    return $_download_store_lookup->{ localfile };
+    unless ( defined $_download_store_lookup->{ $download_store } )
+    {
+        die "Download store '$download_store' is not initialized for download " . $download->{ downloads_id };
+    }
+
+    return $_download_store_lookup->{ $download_store };
 }
 
 # fetch the content for the given download as a content_ref
@@ -275,29 +308,24 @@ sub fetch_content($$)
     my $store = _download_store_for_reading( $download );
     unless ( defined $store )
     {
-        die "No download path or the state is not 'success' for download ID " . $download->{ downloads_id };
+        croak "No download path or the state is not 'success' for download ID " . $download->{ downloads_id };
     }
 
     # Fetch content
-    if ( my $content_ref = $store->fetch_content( $db, $download->{ downloads_id }, $download->{ path } ) )
+    my $content_ref = $store->fetch_content( $db, $download->{ downloads_id }, $download->{ path } );
+    unless ( $content_ref and ref( $content_ref ) eq 'SCALAR' )
     {
-
-        # horrible hack to fix old content that is not stored in unicode
-        my $ascii_hack_downloads_id = get_config->{ mediawords }->{ ascii_hack_downloads_id };
-        if ( $ascii_hack_downloads_id and ( $download->{ downloads_id } < $ascii_hack_downloads_id ) )
-        {
-            $$content_ref =~ s/[^[:ascii:]]/ /g;
-        }
-
-        return $content_ref;
+        croak "Unable to fetch content for download " . $download->{ downloads_id };
     }
-    else
+
+    # horrible hack to fix old content that is not stored in unicode
+    my $ascii_hack_downloads_id = get_config->{ mediawords }->{ ascii_hack_downloads_id };
+    if ( $ascii_hack_downloads_id and ( $download->{ downloads_id } < $ascii_hack_downloads_id ) )
     {
-        warn "Unable to fetch content for download " . $download->{ downloads_id } . "\n";
-
-        my $ret = '';
-        return \$ret;
+        $$content_ref =~ s/[^[:ascii:]]/ /g;
     }
+
+    return $content_ref;
 }
 
 # fetch the content as lines in an array after running through the extractor preprocessor
@@ -535,47 +563,50 @@ sub process_download_for_extractor($$$;$$$)
 
     #say STDERR "Got download_text";
 
+    my $has_remaining_download = $db->query(
+        <<EOF,
+        SELECT downloads_id
+        FROM downloads
+        WHERE stories_id = ?
+          AND extracted = 'f'
+          AND type = 'content'
+EOF
+        $stories_id
+    )->hash;
+
     unless ( $no_vector )
     {
         # Vector
-        my $remaining_download = $db->query(
-            <<EOF,
-            SELECT downloads_id
-            FROM downloads
-            WHERE stories_id = ?
-              AND extracted = 'f'
-              AND type = 'content'
-EOF
-            $stories_id
-        )->hash;
-        unless ( $remaining_download )
+        if ( $has_remaining_download )
+        {
+            say STDERR "[$process_num] pending more downloads ...";
+        }
+        else
         {
             my $story = $db->find_by_id( 'stories', $stories_id );
 
             MediaWords::StoryVectors::update_story_sentence_words_and_language( $db, $story, 0, $no_dedup_sentences );
         }
+    }
+
+    unless ( $has_remaining_download )
+    {
+
+        if (    MediaWords::Util::CoreNLP::annotator_is_enabled()
+            and MediaWords::Util::CoreNLP::story_is_annotatable( $db, $stories_id ) )
+        {
+            # Story is annotatable with CoreNLP; enqueue for CoreNLP annotation
+            # (which will run mark_as_processed() on its own)
+            MediaWords::GearmanFunction::AnnotateWithCoreNLP->enqueue_on_gearman( { stories_id => $stories_id } );
+
+        }
         else
         {
-            say STDERR "[$process_num] pending more downloads ...";
-        }
-    }
-
-    if (    MediaWords::Util::CoreNLP::annotator_is_enabled()
-        and MediaWords::Util::CoreNLP::story_is_annotatable( $db, $stories_id ) )
-    {
-
-        # Story is annotatable with CoreNLP; enqueue for CoreNLP annotation (which will run mark_as_processed() on its own)
-        MediaWords::GearmanFunction::AnnotateWithCoreNLP->enqueue_on_gearman(
-            { downloads_id => $download->{ downloads_id } } );
-
-    }
-    else
-    {
-
-        # Story is not annotatable with CoreNLP; add to "processed_stories" right away
-        unless ( MediaWords::DBI::Stories::mark_as_processed( $db, $stories_id ) )
-        {
-            die "Unable to mark story ID $stories_id as processed";
+            # Story is not annotatable with CoreNLP; add to "processed_stories" right away
+            unless ( MediaWords::DBI::Stories::mark_as_processed( $db, $stories_id ) )
+            {
+                die "Unable to mark story ID $stories_id as processed";
+            }
         }
     }
 }
@@ -586,10 +617,7 @@ sub extract_and_vector($$$;$$$)
 {
     my ( $db, $download, $process_num, $no_dedup_sentences, $no_vector ) = @_;
 
-    eval {
-        MediaWords::DBI::Downloads::process_download_for_extractor( $db, $download, $process_num, $no_dedup_sentences,
-            $no_vector );
-    };
+    eval { process_download_for_extractor( $db, $download, $process_num, $no_dedup_sentences, $no_vector ); };
 
     if ( $@ )
     {

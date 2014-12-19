@@ -14,6 +14,7 @@ use DateTime;
 use Encode;
 use Getopt::Long;
 use HTML::LinkExtractor;
+use List::Util;
 use URI;
 use URI::Split;
 use URI::Escape;
@@ -35,6 +36,9 @@ use constant LINK_WEIGHT_ITERATIONS => 3;
 
 # tag that will be associate with all controversy_stories at the end of the script
 use constant ALL_TAG => 'all';
+
+# max number of solely self linked stories to include
+use constant MAX_SELF_LINKED_STORIES => 200;
 
 # ignore links that match this pattern
 my $_ignore_link_pattern =
@@ -1023,6 +1027,53 @@ END
     }
 }
 
+# return true if this story is already a controversy story or
+# if the story has the same media_id as the source linking story and
+# there are already MAX_SELF_LINKED_STORIES solely self linked stories for the given
+# media source.  this prevents the spider from downloading too many pages within a single
+# site that self links a lot, like freedictionary.com, youtube, or google books
+sub skip_controversy_story
+{
+    my ( $db, $controversy, $story, $link ) = @_;
+
+    return 1 if ( story_is_controversy_story( $db, $controversy, $story ) );
+
+    my $ss = $db->find_by_id( 'stories', $link->{ stories_id } );
+    return 0 if ( $ss->{ media_id } != $story->{ media_id } );
+
+    # this query is much quicker than the below one, so do it first
+    my ( $num_stories ) = $db->query( <<END, $controversy->{ controversies_id }, $story->{ media_id } )->flat;
+select count(*) from cd.live_stories where controversies_id = ? and media_id = ?
+END
+
+    my $MAX_SELF_LINKED_STORIES = MAX_SELF_LINKED_STORIES;
+    return 0 if ( $num_stories <= $MAX_SELF_LINKED_STORIES );
+
+    my ( $num_cross_linked_stories ) = $db->query( <<END, $controversy->{ controversies_id }, $story->{ media_id } )->flat;
+select count( distinct rs.stories_id )
+    from cd.live_stories rs
+        join controversy_links cl on ( cl.controversies_id = \$1 and rs.stories_id = cl.ref_stories_id )
+        join cd.live_stories ss on ( ss.controversies_id = \$1 and cl.stories_id = ss.stories_id )
+    where 
+        rs.controversies_id = \$1 and 
+        rs.media_id = \$2 and
+        ss.media_id <> rs.media_id
+    limit ( $num_stories - $MAX_SELF_LINKED_STORIES )
+END
+
+    my $num_self_linked_stories = $num_stories - $num_cross_linked_stories;
+
+    if ( $num_self_linked_stories > $MAX_SELF_LINKED_STORIES )
+    {
+        say STDERR "skip self linked story: $story->{ url }";
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
 # if the story matches the controversy pattern, add it to controversy_stories and controversy_links
 sub add_to_controversy_stories_and_links_if_match
 {
@@ -1030,7 +1081,7 @@ sub add_to_controversy_stories_and_links_if_match
 
     set_controversy_link_ref_story( $db, $story, $link ) if ( $link->{ controversy_links_id } );
 
-    return if ( story_is_controversy_story( $db, $controversy, $story ) );
+    return if ( skip_controversy_story( $db, $controversy, $story, $link ) );
 
     if ( $link->{ assume_match } || story_matches_controversy_pattern( $db, $controversy, $story ) )
     {
@@ -1208,14 +1259,15 @@ sub spider_new_links
 {
     my ( $db, $controversy, $iteration ) = @_;
 
-    my $new_links = $db->query(
-        "select distinct cs.iteration, cl.* from controversy_links cl, controversy_stories cs " .
-          "  where cl.ref_stories_id is null and cl.stories_id = cs.stories_id and cs.iteration < ? and " .
-          "    cs.controversies_id = ? and cl.controversies_id = ? ",
-        $iteration,
-        $controversy->{ controversies_id },
-        $controversy->{ controversies_id }
-    )->hashes;
+    my $new_links = $db->query( <<END, $iteration, $controversy->{ controversies_id } )->hashes;
+select distinct cs.iteration, cl.* from controversy_links cl, controversy_stories cs
+    where 
+        cl.ref_stories_id is null and 
+        cl.stories_id = cs.stories_id and 
+        ( cs.iteration < \$1 or cs.iteration = 1000 ) and
+        cs.controversies_id = \$2 and 
+        cl.controversies_id = \$2
+END
 
     add_new_links( $db, $controversy, $iteration, $new_links );
 }
@@ -1429,6 +1481,23 @@ sub generate_link_weights
     }
 }
 
+# get the smaller iteration of the two stories
+sub get_merged_iteration
+{
+    my ( $db, $controversy, $delete_story, $keep_story ) = @_;
+
+    my $cid = $controversy->{ controversies_id };
+    my $i = $db->query( <<END, $cid, $delete_story->{ stories_id }, $keep_story->{ stories_id } )->flat;
+select iteration
+    from controversy_stories
+    where 
+        controversies_id  = \$1 and
+        stories_id in ( \$2, \$3 )
+END
+
+    return List::Util::min( @{ $i } );
+}
+
 # merge delete_story into keep_story by making sure all links that are in delete_story are also in keep_story
 # and making sure that keep_story is in controversy_stories.  once done, delete delete_story from controversy_stories (but not
 # from stories)
@@ -1453,8 +1522,11 @@ END
         set_controversy_link_ref_story( $db, $keep_story, $ref_controversy_link );
     }
 
-    add_to_controversy_stories( $db, $controversy, $keep_story, 1000, 1 )
-      unless ( story_is_controversy_story( $db, $controversy, $keep_story ) );
+    if ( !story_is_controversy_story( $db, $controversy, $keep_story ) )
+    {
+        my $merged_iteration = get_merged_iteration( $db, $controversy, $delete_story, $keep_story );
+        add_to_controversy_stories( $db, $controversy, $keep_story, $merged_iteration, 1 );
+    }
 
     my $controversy_links = $db->query( <<END, $delete_story->{ stories_id }, $controversies_id )->hashes;
 select * from controversy_links where stories_id = ? and controversies_id = ?

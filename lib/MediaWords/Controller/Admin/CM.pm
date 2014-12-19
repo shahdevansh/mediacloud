@@ -582,6 +582,8 @@ sub _get_top_media_for_time_slice
 
     return unless ( $num_media );
 
+    $num_media = 20 if ( $num_media > 20 );
+
     my $top_media = $db->query(
         <<END,
         SELECT m.*,
@@ -1524,7 +1526,7 @@ sub search_stories : Local
     my $query = $c->req->params->{ q };
     my $search_query = _get_stories_id_search_query( $db, $query );
 
-    my $order = $c->req->params->{ order };
+    my $order = $c->req->params->{ order } || '';
     my $order_clause = $order eq 'bitly_click_count' ? 'slc.bitly_click_count desc' : 'slc.inlink_count desc';
 
     my $stories = $db->query(
@@ -1541,8 +1543,9 @@ sub search_stories : Local
              dump_story_link_counts AS slc
         WHERE s.stories_id = slc.stories_id
           AND s.media_id = m.media_id
-          AND s.stories_id IN ( $search_query )
+          AND s.stories_id IN ( $search_query )          
         ORDER BY $order_clause
+        limit 1000
 END
     )->hashes;
 
@@ -1645,7 +1648,7 @@ sub search_media : Local
     my $query = $c->req->param( 'q' );
     my $search_query = _get_stories_id_search_query( $db, $query );
 
-    my $order = $c->req->params->{ order };
+    my $order = $c->req->params->{ order } || '';
     my $order_clause = $order eq 'bitly_click_count' ? 'mlc.bitly_click_count desc' : 'mlc.inlink_count desc';
 
     my $media = $db->query(
@@ -1665,6 +1668,7 @@ sub search_media : Local
           AND s.media_id = mlc.media_id
           AND s.stories_id IN ( $search_query )
         ORDER BY $order_clause
+        limit 1000
 END
     )->hashes;
 
