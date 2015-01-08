@@ -10,6 +10,7 @@ use MediaWords::CommonLibs;
 
 use DateTime;
 use Time::Local;
+use Carp;
 
 my $_local_tz = DateTime::TimeZone->new( name => 'local' );
 
@@ -22,7 +23,7 @@ sub get_ids_in_list
 
     if ( grep( /[^0-9]/, @{ $list } ) )
     {
-        die( "non-number list id list: " . join( ', ', @{ $list } ) );
+        confess "non-number list id list: " . join( ', ', @{ $list } );
     }
 
     return join( ',', @{ $list } );
@@ -48,12 +49,12 @@ sub get_epoch_from_sql_date($)
 
     unless ( $date )
     {
-        die "Date is undefined or empty.";
+        confess "Date is undefined or empty.";
     }
 
     unless ( $date =~ /^\d\d\d\d-\d\d-\d\d$/ or $date =~ /^\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d$/ )
     {
-        die "Date is invalid: $date";
+        confess "Date is invalid: $date";
     }
 
     my $year  = substr( $date, 0, 4 );
