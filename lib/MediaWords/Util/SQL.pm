@@ -42,7 +42,7 @@ sub get_sql_date_from_epoch
 # Given one of the SQL date formats, either:
 # * "YYYY-MM-DD" or
 # * "YYYY-MM-DD HH:mm:ss", or
-# * "YYYY-MM-DD HH:mm:ss.mmmmmm"
+# * "YYYY-MM-DD HH:mm:ss.ms"
 # return the epoch time (UNIX timestamp)
 sub get_epoch_from_sql_date($)
 {
@@ -55,7 +55,7 @@ sub get_epoch_from_sql_date($)
 
     unless ( $date =~ /^\d\d\d\d-\d\d-\d\d$/
         or $date =~ /^\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d$/
-        or $date =~ /^\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d\.\d\d\d\d\d\d$/ )
+        or $date =~ /^\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d\.\d{1,6}$/ )
     {
         confess "Date is invalid: $date";
     }
