@@ -18,6 +18,7 @@ use Scalar::Defer;
 
 use MediaWords::CM::Model;
 use MediaWords::DBI::Media;
+use MediaWords::Solr;
 use MediaWords::Util::Bitly;
 use MediaWords::Util::CSV;
 use MediaWords::Util::Colors;
@@ -27,8 +28,8 @@ use MediaWords::Util::SQL;
 use MediaWords::DBI::Activities;
 
 # max and mind node sizes for gexf dump
-use constant MAX_NODE_SIZE => 35;
-use constant MIN_NODE_SIZE => 7;
+use constant MAX_NODE_SIZE => 17;
+use constant MIN_NODE_SIZE => 1;
 
 # max map width for gexf dump
 use constant MAX_MAP_WIDTH => 800;
@@ -139,20 +140,31 @@ sub discard_temp_tables
     $db->query( "discard temp" );
 }
 
-# remove stories from dump_period_stories that don't match the $csts->{ tags_id }, if present
-sub _restrict_period_stories_to_tag
+# remove stories from dump_period_stories that don't math solr query in the associated query slice, if any
+sub restrict_period_stories_to_query_slice
 {
     my ( $db, $cdts ) = @_;
 
-    return unless ( $cdts->{ tags_id } );
+    return unless ( $cdts->{ controversy_query_slices_id } );
 
-    # it may be a little slower to add all the rows and then delete them, but
-    # it makes the code much cleaner
-    $db->query( <<END, $cdts->{ tags_id } );
-delete from dump_period_stories s where not exists
-        ( select 1 from stories_tags_map stm where stm.stories_id = s.stories_id and stm.tags_id = ? )
-END
+    my $qs = $db->find_by_id( 'controversy_query_slices', $cdts->{ controversy_query_slices_id } );
 
+    my $dump_period_stories_ids = $db->query( "select stories_id from dump_period_stories" )->flat;
+
+    if ( !@{ $dump_period_stories_ids } )
+    {
+        $db->query( "truncate table dump_period_stories" );
+        return;
+    }
+
+    my $stories_ids_list = join( ' ', @{ $dump_period_stories_ids } );
+
+    my $solr_q = "( $qs->{ query } ) and stories_id:( $stories_ids_list )";
+    my $solr_stories_ids = MediaWords::Solr::search_for_stories_ids( $db, { q => $solr_q } );
+
+    my $ids_table = $db->get_temporary_ids_table( $solr_stories_ids );
+
+    $db->query( "delete from dump_period_stories where stories_id not in ( select id from $ids_table )" );
 }
 
 # write dump_period_stories table that holds list of all stories that should be included in the
@@ -171,7 +183,7 @@ sub _write_period_stories
 
     $db->query( "drop table if exists dump_period_stories" );
 
-    if ( !$cdts || ( !$cdts->{ tags_id } && ( $cdts->{ period } eq 'overall' ) ) )
+    if ( !$cdts || ( $cdts->{ period } eq 'overall' ) )
     {
         $db->query( <<END );
 create temporary table dump_period_stories $_temporary_tablespace as select stories_id from dump_stories
@@ -217,9 +229,9 @@ END
         $db->query( "drop view dump_undateable_stories" );
     }
 
-    if ( $cdts->{ tags_id } )
+    if ( $cdts->{ controversy_query_slices_id } )
     {
-        _restrict_period_stories_to_tag( $db, $cdts );
+        restrict_period_stories_to_query_slice( $db, $cdts );
     }
 }
 
@@ -556,7 +568,7 @@ sub add_extra_fields_to_dump_media
     my $all_fields = [ $partisan_field ];
 
     map { $_media_static_gexf_attribute_types->{ $_ } = 'string'; } @{ $all_fields };
-    
+
     return $all_fields;
 }
 
@@ -707,11 +719,11 @@ sub attach_stories_to_media
     map { push( @{ $media_lookup->{ $_->{ media_id } }->{ stories } }, $_ ) } @{ $stories };
 }
 
-sub get_link_weighted_edges
+sub get_weighted_edges
 {
-    my ( $db, $media ) = @_;
+    my ( $db, $media, $max_gexf_media ) = @_;
 
-    my $media_links = $db->query( <<END, MAX_GEXF_MEDIA )->hashes;
+    my $media_links = $db->query( <<END, $max_gexf_media )->hashes;
 with top_media as (
     select media_id from dump_medium_link_counts order by inlink_count desc limit ?
 )
@@ -746,11 +758,17 @@ END
     return $edges;
 }
 
-sub _get_weighted_edges
+# given an rgb hex string, return a hash in the form { r => 12, g => 0, b => 255 }, which is
+# what we need for the viz:color element of the gexf dump
+sub get_color_hash_from_hex
 {
-    my ( $db, $media ) = @_;
+    my ( $rgb_hex ) = @_;
 
-    return get_link_weighted_edges( $db, $media );
+    return {
+        r => hex( substr( $rgb_hex, 0, 2 ) ),
+        g => hex( substr( $rgb_hex, 2, 2 ) ),
+        b => hex( substr( $rgb_hex, 4, 2 ) )
+    };
 }
 
 # get a consistent color from MediaWords::Util::Colors.  convert to a color hash as needed by gexf.  translate
@@ -920,14 +938,13 @@ sub _scale_node_sizes
     map { $_->{ 'viz:size' }->{ value } += 1 } @{ $nodes };
 
     my $max_size = 1;
-    map { my $s = $_->{ 'viz:size' }->{ value }; $max_size = $s if ( $max_size < $s ); } @{ $nodes };
+    for my $node ( @{ $nodes } )
+    {
+        my $s = $node->{ 'viz:size' }->{ value };
+        $max_size = $s if ( $max_size < $s );
+    }
 
     my $scale = MAX_NODE_SIZE / $max_size;
-
-    # if ( $scale > 1 )
-    # {
-    #     $scale = 0.5 + ( $scale / 2 );
-    # }
 
     # my $scale = ( $max_size > ( MAX_NODE_SIZE / MIN_NODE_SIZE ) ) ? ( MAX_NODE_SIZE / $max_size ) : 1;
 
@@ -1065,11 +1082,12 @@ sub layout_gexf_with_graphviz_1
 # write gexf dump of nodes
 sub get_gexf_dump
 {
-    my ( $db, $cdts, $color_field ) = @_;
+    my ( $db, $cdts, $color_field, $max_media ) = @_;
 
     $color_field ||= 'media_type';
+    $max_media   ||= MAX_GEXF_MEDIA;
 
-    my $media = $db->query( <<END, MAX_GEXF_MEDIA )->hashes;
+    my $media = $db->query( <<END, $max_media )->hashes;
 select distinct * 
     from dump_media_with_types m, dump_medium_link_counts mlc 
     where m.media_id = mlc.media_id
@@ -1112,7 +1130,7 @@ END
         push( @{ $attributes->{ attribute } }, { id => $i++, title => $name, type => $type } );
     }
 
-    my $edges = get_weighted_edges( $db, $media );
+    my $edges = get_weighted_edges( $db, $media, $max_media );
     $graph->{ edges }->{ edge } = $edges;
 
     my $edge_lookup;
@@ -1167,18 +1185,18 @@ END
 
 sub _create_controversy_dump_time_slice($$$$$$)
 {
-    my ( $db, $cd, $start_date, $end_date, $period, $tag ) = @_;
+    my ( $db, $cd, $start_date, $end_date, $period, $query_slice ) = @_;
 
     my $cdts = {
-        controversy_dumps_id => $cd->{ controversy_dumps_id },
-        start_date           => $start_date,
-        end_date             => $end_date,
-        period               => $period,
-        story_count          => 0,
-        story_link_count     => 0,
-        medium_count         => 0,
-        medium_link_count    => 0,
-        tags_id              => $tag ? $tag->{ tags_id } : undef
+        controversy_dumps_id        => $cd->{ controversy_dumps_id },
+        start_date                  => $start_date,
+        end_date                    => $end_date,
+        period                      => $period,
+        story_count                 => 0,
+        story_link_count            => 0,
+        medium_count                => 0,
+        medium_link_count           => 0,
+        controversy_query_slices_id => $query_slice ? $query_slice->{ controversy_query_slices_id } : undef
     };
 
     $cdts = $db->create( 'controversy_dump_time_slices', $cdts );
@@ -1231,11 +1249,13 @@ sub update_cdts_counts ($$;$)
 # generate the dump time slices for the given period, dates, and tag
 sub _generate_cdts($$$$$$)
 {
-    my ( $db, $cd, $start_date, $end_date, $period, $tag ) = @_;
+    my ( $db, $cd, $start_date, $end_date, $period, $query_slice ) = @_;
 
-    my $cdts = _create_controversy_dump_time_slice( $db, $cd, $start_date, $end_date, $period, $tag );
+    my $cdts = create_controversy_dump_time_slice( $db, $cd, $start_date, $end_date, $period, $query_slice );
 
-    my $dump_label = "${ period }: ${ start_date } - ${ end_date } " . ( $tag ? "[ $tag->{ tag } ]" : "" );
+    my $dump_label = "${ period }: ${ start_date } - ${ end_date } ";
+    $dump_label .= "[ $query_slice->{ name } ]" if ( $query_slice );
+
     print "generating $dump_label ...\n";
 
     my $all_models_top_media = MediaWords::CM::Model::get_all_models_top_media( $db, $cdts );
@@ -1281,7 +1301,7 @@ sub truncate_to_start_of_month ($)
 # generate dumps for the periods in controversy_dates
 sub _generate_custom_period_dump($$$)
 {
-    my ( $db, $cd, $tag ) = @_;
+    my ( $db, $cd, $query_slice ) = @_;
 
     my $controversy_dates = $db->query( <<END, $cd->{ controversies_id } )->hashes;
 select * from controversy_dates where controversies_id = ? order by start_date, end_date
@@ -1291,21 +1311,25 @@ END
     {
         my $start_date = $controversy_date->{ start_date };
         my $end_date   = $controversy_date->{ end_date };
-        _generate_cdts( $db, $cd, $start_date, $end_date, 'custom', $tag );
+        generate_cdts( $db, $cd, $start_date, $end_date, 'custom', $query_slice );
     }
 }
 
 # generate dump for the given period (overall, monthly, weekly, or custom) and the given tag
 sub _generate_period_dump($$$$)
 {
-    my ( $db, $cd, $period, $tag ) = @_;
+    my ( $db, $cd, $period, $query_slice ) = @_;
 
     my $start_date = $cd->{ start_date };
     my $end_date   = $cd->{ end_date };
 
     if ( $period eq 'overall' )
     {
-        _generate_cdts( $db, $cd, $start_date, $end_date, $period, $tag );
+        generate_cdts( $db, $cd, $start_date, $end_date, $period, $query_slice );
+    }
+    elsif ( $query_slice && !$query_slice->{ all_time_slices } )
+    {
+        return;
     }
     elsif ( $period eq 'weekly' )
     {
@@ -1314,7 +1338,7 @@ sub _generate_period_dump($$$$)
         {
             my $w_end_date = MediaWords::Util::SQL::increment_day( $w_start_date, 7 );
 
-            _generate_cdts( $db, $cd, $w_start_date, $w_end_date, $period, $tag );
+            generate_cdts( $db, $cd, $w_start_date, $w_end_date, $period, $query_slice );
 
             $w_start_date = $w_end_date;
         }
@@ -1327,14 +1351,14 @@ sub _generate_period_dump($$$$)
             my $m_end_date = MediaWords::Util::SQL::increment_day( $m_start_date, 32 );
             $m_end_date = MediaWords::Util::SQL::truncate_to_start_of_month( $m_end_date );
 
-            _generate_cdts( $db, $cd, $m_start_date, $m_end_date, $period, $tag );
+            generate_cdts( $db, $cd, $m_start_date, $m_end_date, $period, $query_slice );
 
             $m_start_date = $m_end_date;
         }
     }
     elsif ( $period eq 'custom' )
     {
-        _generate_custom_period_dump( $db, $cd, $tag );
+        generate_custom_period_dump( $db, $cd, $query_slice );
     }
     else
     {
@@ -1602,16 +1626,19 @@ sub _analyze_snapshot_tables
     }
 }
 
-# get the tags associated with the controversy through controversy_dump_tags
-sub _get_dump_tags
+# validate and set the periods for the dump based on the period parameter
+sub get_periods ($)
 {
-    my ( $db, $controversy ) = @_;
+    my ( $period ) = @_;
 
-    my $tags = $db->query( <<END, $controversy->{ controversies_id } )->hashes;
-select distinct t.*
-    from tags t
-        join controversy_dump_tags cdt on ( t.tags_id = cdt.tags_id and cdt.controversies_id = ? )
-END
+    $period ||= 'all';
+
+    my $all_periods = [ qw(custom overall weekly monthly) ];
+
+    die( "period must be all, custom, overall, weekly, or monthly" )
+      if ( $period && !grep { $_ eq $period } ( 'all', @{ $all_periods } ) );
+
+    return ( $period eq 'all' ) ? $all_periods : [ $period ];
 }
 
 # create a controversy_dump for the given controversy
@@ -1645,7 +1672,9 @@ sub dump_controversy ($$)
 
     my ( $start_date, $end_date ) = _get_default_dates( $db, $controversy );
 
-    my $dump_tags = _get_dump_tags( $db, $controversy );
+    my $query_slices = $db->query( <<SQL, $controversy->{ controversies_id } )->hashes;
+select * from controversy_query_slices where controversies_id = ?
+SQL
 
     my $cd = _create_controversy_dump( $db, $controversy, $start_date, $end_date );
 
@@ -1653,11 +1682,11 @@ sub dump_controversy ($$)
 
     _generate_snapshots_from_temporary_dump_tables( $db, $cd );
 
-    for my $t ( undef, @{ $dump_tags } )
+    for my $qs ( undef, @{ $query_slices } )
     {
         for my $p ( @{ $periods } )
         {
-            _generate_period_dump( $db, $cd, $p, $t );
+            generate_period_dump( $db, $cd, $p, $qs );
         }
     }
 

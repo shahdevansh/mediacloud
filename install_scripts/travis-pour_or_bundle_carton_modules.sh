@@ -31,14 +31,6 @@ S3_PREFIX="local"
 
 function bundle_id {
 
-    if [ `uname` == 'Darwin' ]; then
-        # Mac OS X
-        DATE=gdate
-    else
-        # assume Ubuntu
-        DATE=date
-    fi
-
     # Kernel architecture, e.g. x86_64
     local OS_ARCH=`uname -m`
     if [ -z "$OS_ARCH" ]; then
@@ -53,17 +45,17 @@ function bundle_id {
         exit 1
     fi
 
-    # Author date (GMT) of current version of "cpanfile", e.g. "2014_06_23_15_29_22"
-    local CPANFILE_DATE=$(TZ=UTC $DATE --date "@$(git log -1 --format=%at cpanfile)" "+%F-%T" | tr -s ' :-' '_')
-    if [ -z "$CPANFILE_DATE" ]; then
-        echo "Unable to determine 'cpanfile' author date."
+    # File's "cpanfile" signature, e.g. last modification date or a hash
+    local CPANFILE_SIGNATURE=$(sha1sum cpanfile | cut -d " " -f1)
+    if [ -z "$CPANFILE_SIGNATURE" ]; then
+        echo "Unable to determine file's \"cpanfile\" signature."
         exit 1
     fi
 
-    # Author date (GMT) of current version of "cpanfile.snapshot", e.g. "2014_06_23_14_50_51"
-    local CPANFILE_SNAPSHOT_DATE=$(TZ=UTC $DATE --date "@$(git log -1 --format=%at cpanfile.snapshot)" "+%F-%T" | tr -s ' :-' '_')
-    if [ -z "$CPANFILE_SNAPSHOT_DATE" ]; then
-        echo "Unable to determine 'cpanfile.snapshot' author date."
+    # File's "cpanfile.snapshot" signature, e.g. last modification date or a hash
+    local CPANFILE_SNAPSHOT_SIGNATURE=$(sha1sum cpanfile.snapshot | cut -d " " -f1)
+    if [ -z "$CPANFILE_SNAPSHOT_SIGNATURE" ]; then
+        echo "Unable to determine file's \"cpanfile.snapshot\" signature."
         exit 1
     fi
 
@@ -85,7 +77,7 @@ function bundle_id {
         OS_VERSION="osx_${MAC_OS_X_VERSION}"
     fi
 
-    local BUNDLE_ID="${OS_VERSION}-${OS_ARCH}-perl_${PERL_VERSION}-cpanfile_${CPANFILE_DATE}-snapshot_${CPANFILE_SNAPSHOT_DATE}"
+    local BUNDLE_ID="${OS_VERSION}-${OS_ARCH}-perl_${PERL_VERSION}-cpanfile_${CPANFILE_SIGNATURE}-snapshot_${CPANFILE_SNAPSHOT_SIGNATURE}"
     echo "$BUNDLE_ID"
 }
 
@@ -108,10 +100,10 @@ echo "TGZ filename: $TGZ_FILENAME"
 BUNDLE_URL="http://${S3_BUCKET_NAME}.s3-website-${S3_REGION}.amazonaws.com/${S3_PATH}/${TGZ_FILENAME}"
 echo "Bundle URL: $BUNDLE_URL"
 
-if curl --output /dev/null --silent --head --fail "$BUNDLE_URL" > /dev/null; then
+if curl --retry 3 --retry-delay 3 --output /dev/null --silent --head --fail "$BUNDLE_URL" > /dev/null; then
 
     echo "Bundle at URL exists, fetching and pouring..."
-    curl -0 "$BUNDLE_URL" | tar -zx || {
+    curl --retry 3 --retry-delay 3 -0 "$BUNDLE_URL" | tar -zx || {
         echo "Bundle exists at the URL, but I've failed to download and pour it, so giving up."
         exit 1
     }

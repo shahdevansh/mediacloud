@@ -20,6 +20,7 @@ use MediaWords::Languages::Language;
 use MediaWords::StoryVectors;
 use List::Compare;
 
+# cached ids of tags, which should change rarely
 my $_tags_id_cache = {};
 
 # get cached id of the tag.  create the tag if necessary.
@@ -503,15 +504,16 @@ EOF
     return join( ".\n\n", map { $_->{ download_text } } @{ $download_texts } );
 }
 
+## TODO rename this function
 sub get_extracted_html_from_db
 {
     my ( $db, $story ) = @_;
 
-    my $download_texts = $db->query(
-        "select dt.* from downloads d, download_texts dt " .
-          "  where dt.downloads_id = d.downloads_id and d.stories_id = ? order by d.downloads_id",
-        $story->{ stories_id }
-    )->hashes;
+    my $download_texts = $db->query( <<END, $story->{ stories_id } )->hashes;
+select dt.downloads_id, dt.download_texts_id
+	from downloads d, download_texts dt
+	where dt.downloads_id = d.downloads_id and d.stories_id = ? order by d.downloads_id
+END
 
     return join( "\n", map { MediaWords::DBI::DownloadTexts::get_extracted_html_from_db( $db, $_ ) } @{ $download_texts } );
 }
@@ -697,7 +699,7 @@ sub is_new
     my $db_story = $dbs->query( <<"END", $story->{ guid }, $story->{ media_id } )->hash;
 SELECT *
     FROM stories
-    WHERE 
+    WHERE
         guid = ?
         AND media_id = ?
 END
@@ -732,11 +734,11 @@ END
     $db_story = $dbs->query( <<END, $title, $story->{ media_id }, $story->{ publish_date } )->hash;
 SELECT 1
     FROM stories
-    WHERE 
+    WHERE
         md5( title ) = md5( ? ) AND
         media_id = ? AND
-        date_trunc( 'day', publish_date )  + interval '1 second' = 
-            date_trunc( 'day', ?::date ) + interval '1 second' 
+        date_trunc( 'day', publish_date )  + interval '1 second' =
+            date_trunc( 'day', ?::date ) + interval '1 second'
     FOR UPDATE
 END
 
@@ -956,7 +958,7 @@ sub mark_undateable
     $db->query( <<END, $story->{ stories_id } );
 delete from stories_tags_map stm
     using tags t
-        join tag_sets ts on ( t.tag_sets_id = ts.tag_sets_id ) 
+        join tag_sets ts on ( t.tag_sets_id = ts.tag_sets_id )
     where
         t.tags_id = stm.tags_id and
         ts.name = 'date_invalid' and
@@ -1003,7 +1005,7 @@ sub assign_date_guess_method
 delete from stories_tags_map stm
     using tags t
         join tag_sets ts on ( ts.tag_sets_id = t.tag_sets_id )
-    where 
+    where
         t.tags_id = stm.tags_id and
         ts.name = ? and
         stm.stories_id = ?
@@ -1015,6 +1017,46 @@ END
 
     my $date_guess_method_tag = MediaWords::Util::Tags::lookup_or_create_tag( $db, "$tag_set_name:$date_guess_method" );
     $db->query( <<END, $story->{ stories_id }, $date_guess_method_tag->{ tags_id } );
+insert into stories_tags_map ( stories_id, tags_id ) values ( ?, ? )
+END
+
+}
+
+my $_extractor_version_tag_set;
+
+sub _get_extractor_version_tag_set
+{
+
+    my ( $db ) = @_;
+
+    if ( !defined( $_extractor_version_tag_set ) )
+    {
+        $_extractor_version_tag_set = MediaWords::Util::Tags::lookup_or_create_tag_set( $db, "extractor_version" );
+    }
+
+    return $_extractor_version_tag_set;
+}
+
+# add extractor version tag
+sub update_extractor_version_tag
+{
+    my ( $db, $story, $extractor_version ) = @_;
+
+    my $tag_set = _get_extractor_version_tag_set( $db );
+
+    $db->query( <<END, $tag_set->{ tag_sets_id }, $story->{ stories_id } );
+delete from stories_tags_map stm
+    using tags t
+        join tag_sets ts on ( ts.tag_sets_id = t.tag_sets_id )
+    where
+        t.tags_id = stm.tags_id and
+        ts.tag_sets_id = ? and
+        stm.stories_id = ?
+END
+
+    my $tags_id = _get_tags_id( $db, $tag_set->{ tag_sets_id }, $extractor_version );
+
+    $db->query( <<END, $story->{ stories_id }, $tags_id );
 insert into stories_tags_map ( stories_id, tags_id ) values ( ?, ? )
 END
 
@@ -1071,8 +1113,8 @@ sub get_all_sentences
     for my $sentence ( @{ $raw_sentences } )
     {
         my $ssc = $db->query( <<END, $sentence, $story->{ media_id }, $story->{ publish_date } )->hash;
-select * 
-    from story_sentence_counts 
+select *
+    from story_sentence_counts
     where sentence_md5 = MD5( ? ) and
         media_id = ? and
         publish_week = DATE_TRUNC( 'week', ?::date )

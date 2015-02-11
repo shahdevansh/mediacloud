@@ -9,6 +9,7 @@ use Modern::Perl "2013";
 use MediaWords::CommonLibs;
 
 use DateTime;
+use DateTime::Format::Pg;
 use Time::Local;
 use Carp;
 
@@ -36,7 +37,16 @@ sub get_sql_date_from_epoch
     my $dt = DateTime->from_epoch( epoch => $epoch );
     $dt->set_time_zone( $_local_tz );
 
-    return $dt->datetime;
+    my $date = $dt->datetime;
+
+    $date =~ s/(\d)T(\d)/$1 $2/;
+
+    return $date;
+}
+
+sub sql_now
+{
+    return get_sql_date_from_epoch( time() );
 }
 
 # Given one of the SQL date formats, either:
@@ -60,11 +70,10 @@ sub get_epoch_from_sql_date($)
         confess "Date is invalid: $date";
     }
 
-    my $year  = substr( $date, 0, 4 );
-    my $month = substr( $date, 5, 2 );
-    my $day   = substr( $date, 8, 2 );
+    my $dt = DateTime::Format::Pg->parse_datetime( $date );
+    $dt->set_time_zone( $_local_tz );
 
-    return Time::Local::timelocal( 0, 0, 0, $day, $month - 1, $year );
+    return $dt->epoch;
 }
 
 # given a date in the sql format 'YYYY-MM-DD', increment it by $days days
