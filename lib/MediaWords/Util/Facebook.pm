@@ -67,6 +67,10 @@ Readonly my @URL_PATTERNS_WHICH_WONT_WORK => (
 
     # Google Trends
     qr#^https?://.*?\.google\..{2,7}/trends/explore.*?#i,
+
+    # Pinterest links
+    qr#^https?://(www\.)?pinterest\.com/join/\?next=/pin/create/button/.+?#i,
+
 );
 
 # use https://graph.facebook.com/?id= to get number of shares for the given url

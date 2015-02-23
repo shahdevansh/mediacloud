@@ -70,7 +70,8 @@ sub test_urls_which_wont_work($)
     my @urls_which_wont_work = (
 
         'http://www.google.com/trends/explore#q=net%20neutrality.',
-        'https://www.google.com/webhp?sourceid=chrome-instant&ion=1&espv=2&ie=UTF-8#safe=off&q=net+neutrality'
+        'https://www.google.com/webhp?sourceid=chrome-instant&ion=1&espv=2&ie=UTF-8#safe=off&q=net+neutrality',
+'https://www.pinterest.com/join/?next=/pin/create/button/%3Furl%3Dhttp%253A%252F%252Fwomennewsnetwork.net%252F2014%252F08%252F26%252Fwho-serve-ebola-victims-soldier%252F%26media%3Dhttp%253A%252F%252Fwomennewsnetwork.net%252Fwp-content%252Fuploads%252F2014%252F08%252FJosephine-Finda-Sellu-New-York-Samuel-Aranda.jpg%26description%3D%255BSierra%2520Leone%255D%2520Those%2520%255BWomen%255D%2520Who%2520Serve%2520Ebola%2520Victims%2520Soldier%2520On'
 
     );
 
@@ -157,7 +158,7 @@ sub main()
         }
     }
 
-    plan tests => 28;
+    plan tests => 29;
 
     my $builder = Test::More->builder;
     binmode $builder->output,         ":utf8";
