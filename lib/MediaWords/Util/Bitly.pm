@@ -19,6 +19,7 @@ use MediaWords::Util::DateTime;
 use MediaWords::KeyValueStore::GridFS;
 use URI;
 use URI::QueryParam;
+use Readonly;
 use JSON;
 use Scalar::Util qw/looks_like_number/;
 use Scalar::Defer;
@@ -28,9 +29,11 @@ use DateTime::Duration;
 use constant BITLY_API_ENDPOINT     => 'https://api-ssl.bitly.com/';
 use constant BITLY_GRIDFS_USE_BZIP2 => 0;                              # Gzip works better in Bit.ly's case
 
-# Error message printed when Bit.ly rate limit is exceeded; used for naive
-# exception handling, see error_is_rate_limit_exceeded()
-use constant BITLY_ERROR_LIMIT_EXCEEDED => 'Bit.ly rate limit exceeded. Please wait for a bit and try again.';
+# How many times to try on rate limiting errors
+Readonly my $BITLY_RATE_RETRY_COUNT => 7;                              # try fetching 7 times in total
+
+# How many seconds to sleep() between rate limiting errors
+Readonly my $BITLY_RATE_RETRY_WAIT => 60 * 10;                         # wait for 10 minutes between retries
 
 # (Lazy-initialized) Bit.ly access token
 my $_bitly_access_token = lazy
@@ -191,7 +194,8 @@ sub bitly_processing_is_enabled()
     }
 }
 
-# Sends a request to Bit.ly API, returns a 'data' key hashref with results; die()s on error
+# Sends a request to Bit.ly API, returns a 'data' key hashref with results;
+# die()s on error; retries on rate limiting errors
 sub request($$)
 {
     my ( $path, $params ) = @_;
@@ -230,61 +234,81 @@ sub request($$)
     $uri->query_param( $params );
     my $url = $uri->as_string;
 
-    my $ua = MediaWords::Util::Web::UserAgentDetermined;
-    $ua->timeout( $_bitly_timeout );
-    $ua->max_size( undef );
-
-    my $response = $ua->get( $url );
-
-    unless ( $response->is_success )
+    my ( $json, $json_string );
+    for ( my $retry = 1 ; $retry <= $BITLY_RATE_RETRY_COUNT ; ++$retry )
     {
-        die "Error while fetching API response: " . $response->status_line . "; URL: $url";
-    }
-
-    my $json_string = $response->decoded_content;
-
-    my $json;
-    eval { $json = decode_json( $json_string ); };
-    if ( $@ or ( !$json ) )
-    {
-        die "Unable to decode JSON response: $@; JSON: $json_string";
-    }
-    unless ( ref( $json ) eq ref( {} ) )
-    {
-        die "JSON response is not a hashref; JSON: $json_string";
-    }
-
-    if ( $json->{ status_code } != 200 )
-    {
-        if ( $json->{ status_code } == 403 and $json->{ status_txt } eq 'RATE_LIMIT_EXCEEDED' )
+        if ( $retry > 1 )
         {
-            die BITLY_ERROR_LIMIT_EXCEEDED;
-
+            say STDERR 'Retrying #' . $retry . '...';
         }
-        elsif ( $json->{ status_code } == 500 and $json->{ status_txt } eq 'INVALID_ARG_UNIT_REFERENCE_TS' )
-        {
 
-            my $error_message = '';
-            $error_message .= 'Invalid timestamp ("unit_reference_ts" argument) which is ';
-            if ( defined $params->{ unit_reference_ts } )
+        my $ua = MediaWords::Util::Web::UserAgentDetermined;
+        $ua->timeout( $_bitly_timeout );
+        $ua->max_size( undef );
+
+        my $response = $ua->get( $url );
+
+        unless ( $response->is_success )
+        {
+            die "Error while fetching API response: " . $response->status_line . "; URL: $url";
+        }
+
+        $json_string = $response->decoded_content;
+
+        eval { $json = decode_json( $json_string ); };
+        if ( $@ or ( !$json ) )
+        {
+            die "Unable to decode JSON response: $@; JSON: $json_string";
+        }
+        unless ( ref( $json ) eq ref( {} ) )
+        {
+            die "JSON response is not a hashref; JSON: $json_string";
+        }
+
+        if ( $json->{ status_code } != 200 )
+        {
+            if ( $json->{ status_code } == 403 and $json->{ status_txt } eq 'RATE_LIMIT_EXCEEDED' )
             {
-                $error_message .= $params->{ unit_reference_ts };
-                $error_message .= ' (' . gmt_date_string_from_timestamp( $params->{ unit_reference_ts } ) . ')';
+                say STDERR "Bit.ly rate limit exceeded while fetching URL $url";
+                say STDERR "Will retry after $BITLY_RATE_RETRY_WAIT seconds.";
+                sleep( $BITLY_RATE_RETRY_WAIT );
+
+                # Continue the retry loop
+                next;
+            }
+            elsif ( $json->{ status_code } == 500 and $json->{ status_txt } eq 'INVALID_ARG_UNIT_REFERENCE_TS' )
+            {
+
+                my $error_message = '';
+                $error_message .= 'Invalid timestamp ("unit_reference_ts" argument) which is ';
+                if ( defined $params->{ unit_reference_ts } )
+                {
+                    $error_message .= $params->{ unit_reference_ts };
+                    $error_message .= ' (' . gmt_date_string_from_timestamp( $params->{ unit_reference_ts } ) . ')';
+                }
+                else
+                {
+                    $error_message .= 'undef';
+                }
+                $error_message .= '; request parameters: ' . Dumper( $params );
+
+                die $error_message;
             }
             else
             {
-                $error_message .= 'undef';
+                die 'API returned non-200 HTTP status code ' .
+                  $json->{ status_code } . '; JSON: ' . $json_string . '; request parameters: ' . Dumper( $params );
+
             }
-            $error_message .= '; request parameters: ' . Dumper( $params );
-
-            die $error_message;
         }
-        else
-        {
-            die 'API returned non-200 HTTP status code ' .
-              $json->{ status_code } . '; JSON: ' . $json_string . '; request parameters: ' . Dumper( $params );
 
-        }
+        # Response was successful - break from the retry loop
+        last;
+    }
+
+    unless ( $json )
+    {
+        die "JSON is empty after fetching URL $url";
     }
 
     my $json_data = $json->{ data };
@@ -1412,24 +1436,6 @@ EOF
     }
 
     return $num_controversy_stories_without_bitly_statistics;
-}
-
-# Given the error message ($@ after unsuccessful eval{}), determine whether the
-# error is because of the exceeded Bit.ly rate limit
-sub error_is_rate_limit_exceeded($)
-{
-    my $error_message = shift;
-
-    my $expected_message = BITLY_ERROR_LIMIT_EXCEEDED . '';
-
-    if ( $error_message =~ /$expected_message/ )
-    {
-        return 1;
-    }
-    else
-    {
-        return 0;
-    }
 }
 
 1;
