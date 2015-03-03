@@ -26,14 +26,15 @@ use Scalar::Defer;
 use DateTime;
 use DateTime::Duration;
 
-use constant BITLY_API_ENDPOINT     => 'https://api-ssl.bitly.com/';
-use constant BITLY_GRIDFS_USE_BZIP2 => 0;                              # Gzip works better in Bit.ly's case
+Readonly my $BITLY_API_ENDPOINT => 'https://api-ssl.bitly.com/';
+
+Readonly my $BITLY_GRIDFS_USE_BZIP2 => 0;    # Gzip works better in Bit.ly's case
 
 # How many times to try on rate limiting errors
-Readonly my $BITLY_RATE_RETRY_COUNT => 7;                              # try fetching 7 times in total
+Readonly my $BITLY_RATE_RETRY_COUNT => 7;    # try fetching 7 times in total
 
 # How many seconds to sleep() between rate limiting errors
-Readonly my $BITLY_RATE_RETRY_WAIT => 60 * 10;                         # wait for 10 minutes between retries
+Readonly my $BITLY_RATE_RETRY_WAIT => 60 * 10;    # wait for 10 minutes between retries
 
 # (Lazy-initialized) Bit.ly access token
 my $_bitly_access_token = lazy
@@ -225,7 +226,7 @@ sub request($$)
     }
     $params->{ access_token } = $_bitly_access_token;
 
-    my $uri = URI->new( BITLY_API_ENDPOINT );
+    my $uri = URI->new( $BITLY_API_ENDPOINT );
     $uri->path( $path );
     foreach my $params_key ( keys %{ $params } )
     {
@@ -1341,8 +1342,8 @@ sub write_story_stats($$$)
 
     # Write to GridFS, index by stories_id
     eval {
-        my $param_skip_encode_and_compress  = 0;                            # Objects should be compressed
-        my $param_use_bzip2_instead_of_gzip = BITLY_GRIDFS_USE_BZIP2 + 0;
+        my $param_skip_encode_and_compress  = 0;                         # Objects should be compressed
+        my $param_use_bzip2_instead_of_gzip = $BITLY_GRIDFS_USE_BZIP2;
 
         my $path = $_gridfs_store->store_content(
             $db, $stories_id, \$json_stats,
@@ -1389,7 +1390,7 @@ sub read_story_stats($$)
 
     my $param_object_path                   = undef;
     my $param_skip_uncompress_and_decode    = 0;
-    my $param_use_bunzip2_instead_of_gunzip = BITLY_GRIDFS_USE_BZIP2 + 0;
+    my $param_use_bunzip2_instead_of_gunzip = $BITLY_GRIDFS_USE_BZIP2;
 
     eval {
         $json_ref = $_gridfs_store->fetch_content(
