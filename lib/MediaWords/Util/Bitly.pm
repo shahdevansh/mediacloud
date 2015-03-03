@@ -1011,19 +1011,19 @@ sub bitly_link_shares($;$$)
     # fetch_story_stats())
     package MediaWords::Util::Bitly::StatsToFetch;
 
-    sub new($;$$$$)
+    sub new
     {
         my $class = shift;
-        my ( $fetch_categories, $fetch_clicks, $fetch_referrers, $fetch_shares ) = @_;
+        my %args  = @_;
 
         my $self = {};
         bless $self, $class;
 
         # Default values
-        $self->{ fetch_categories } = $fetch_categories // 0;
-        $self->{ fetch_clicks }     = $fetch_clicks     // 1;
-        $self->{ fetch_referrers }  = $fetch_referrers  // 1;
-        $self->{ fetch_shares }     = $fetch_shares     // 0;
+        $self->{ fetch_categories } = $args{ fetch_categories } // 0;
+        $self->{ fetch_clicks }     = $args{ fetch_clicks }     // 1;
+        $self->{ fetch_referrers }  = $args{ fetch_referrers }  // 1;
+        $self->{ fetch_shares }     = $args{ fetch_shares }     // 0;
 
         return $self;
     }

@@ -37,15 +37,11 @@ use Readonly;
 use Data::Dumper;
 
 # What stats to fetch for each story
-Readonly my $BITLY_FETCH_CATEGORIES => 0;
-Readonly my $BITLY_FETCH_CLICKS     => 1;
-Readonly my $BITLY_FETCH_REFERRERS  => 1;
-Readonly my $BITLY_FETCH_SHARES     => 0;
-Readonly my $stats_to_fetch         => MediaWords::Util::Bitly::StatsToFetch->new(
-    $BITLY_FETCH_CATEGORIES,    # "/v3/link/category"
-    $BITLY_FETCH_CLICKS,        # "/v3/link/clicks"
-    $BITLY_FETCH_REFERRERS,     # "/v3/link/referrers"
-    $BITLY_FETCH_SHARES         # "/v3/link/shares"
+Readonly my $STATS_TO_FETCH => MediaWords::Util::Bitly::StatsToFetch->new(
+    fetch_categories => 0,    # "/v3/link/category"
+    fetch_clicks     => 1,    # "/v3/link/clicks"
+    fetch_referrers  => 1,    # "/v3/link/referrers"
+    fetch_shares     => 0     # "/v3/link/shares"
 );
 
 # Having a global database object should be safe because
@@ -113,7 +109,7 @@ EOF
     my $stats;
     eval {
         $stats =
-          MediaWords::Util::Bitly::fetch_story_stats( $db, $stories_id, $start_timestamp, $end_timestamp, $stats_to_fetch );
+          MediaWords::Util::Bitly::fetch_story_stats( $db, $stories_id, $start_timestamp, $end_timestamp, $STATS_TO_FETCH );
     };
     if ( $@ )
     {
