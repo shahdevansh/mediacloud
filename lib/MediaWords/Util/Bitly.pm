@@ -36,6 +36,10 @@ Readonly my $BITLY_RATE_RETRY_COUNT => 7;    # try fetching 7 times in total
 # How many seconds to sleep() between rate limiting errors
 Readonly my $BITLY_RATE_RETRY_WAIT => 60 * 10;    # wait for 10 minutes between retries
 
+# Expand the date range to API's maximum supported range (usually 1000 days) so
+# that we could get as much data as we can in a single request
+Readonly my $BITLY_EXPAND_DATE_RANGE_TO_LIMIT => 1;
+
 # (Lazy-initialized) Bit.ly access token
 my $_bitly_access_token = lazy
 {
@@ -100,11 +104,19 @@ my $_gridfs_store = lazy
     return $gridfs_store;
 };
 
-# From $start_timestamp and $end_timestamp parameters, return API parameters "unit_reference_ts" and "units"
+# From $start_timestamp and $end_timestamp parameters, returns API parameters
+# "unit_reference_ts" and "units".
+#
+# Complains if the number of units exceeds Bit.ly's limit.
+#
+# Optionally, expands the date range between $start_timestamp and
+# $end_timestamp up to a max. API limit so that we fetch as much data in one
+# request as we can.
+#
 # die()s on error
-sub _unit_reference_ts_and_units_from_start_end_timestamps($$$)
+sub _unit_reference_ts_and_units_from_start_end_timestamps($$$;$)
 {
-    my ( $start_timestamp, $end_timestamp, $max_bitly_limit ) = @_;
+    my ( $start_timestamp, $end_timestamp, $max_bitly_limit, $expand_date_range_to_limit ) = @_;
 
     # Both or none must be defined (note "xor")
     if ( defined $start_timestamp xor defined $end_timestamp )
@@ -159,6 +171,62 @@ sub _unit_reference_ts_and_units_from_start_end_timestamps($$$)
         {
             # Fetch one more day
             ++$delta_days;
+        }
+
+        if ( $expand_date_range_to_limit )
+        {
+            if ( $delta_days < $max_bitly_limit )
+            {
+                my $days_to_add               = $max_bitly_limit - $delta_days;
+                my $add_days_at_the_beginning = int( $days_to_add / 2 );
+                my $add_days_at_the_end       = $days_to_add - $add_days_at_the_beginning;
+
+                say STDERR "Adding $add_days_at_the_beginning days at the " .
+                  "beginning and $add_days_at_the_end days at the end of the date range";
+
+                if ( $delta_days + $add_days_at_the_beginning + $add_days_at_the_end > $max_bitly_limit )
+                {
+                    die "Unable to add $add_days_at_the_beginning days at the " .
+                      "beginning and $add_days_at_the_end days at the end to the $delta_days delta days.";
+                }
+
+                say STDERR "Start date before adding days: " . $start_date->datetime();
+                $start_date = $start_date->subtract( days => $add_days_at_the_beginning );
+                say STDERR "Start date after adding days: " . $start_date->datetime();
+                $start_timestamp = $start_date->epoch();
+
+                say STDERR "End date before adding days: " . $end_date->datetime();
+                $end_date = $end_date->subtract( days => $add_days_at_the_end );
+                say STDERR "End date after adding days: " . $end_date->datetime();
+                $end_timestamp = $end_date->epoch();
+
+                $delta_days = $end_date->delta_days( $start_date )->delta_days;
+            }
+        }
+
+        # If we ask for data in the future, Bit.ly's API will complain, so in
+        # that case move the date range to the left in the timeline
+        my $now = DateTime->now();
+        $now->set( hour => 0, minute => 0, second => 0 );
+        if ( -1 == DateTime->compare( $now, $end_date ) )
+        {
+            say STDERR "End date " . $end_date->datetime() . " is in the future, moving both dates to the past";
+            my $days_to_subtract = $end_date->delta_days( $now )->delta_days;
+
+            say STDERR "Start date before moving to the past: " . $start_date->datetime();
+            $start_date = $start_date->subtract( days => $days_to_subtract );
+            say STDERR "Start date after moving to the past: " . $start_date->datetime();
+            $start_timestamp = $start_date->epoch();
+
+            say STDERR "End date before moving to the past: " . $start_date->datetime();
+            $end_date = $end_date->subtract( days => $days_to_subtract );
+            say STDERR "End date after moving to the past: " . $start_date->datetime();
+            $end_timestamp = $end_date->epoch();
+
+            unless ( DateTime->compare( $now, $end_date ) >= 0 )
+            {
+                die "Date subtraction didn't work; now is " . $now->datetime() . ", end date is " . $end_date->datetime();
+            }
         }
 
         # Make sure it doesn't exceed Bit.ly's limit
@@ -783,7 +851,8 @@ sub bitly_link_clicks($;$$)
     }
 
     my ( $unit_reference_ts, $units ) =
-      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT );
+      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT,
+        $BITLY_EXPAND_DATE_RANGE_TO_LIMIT );
 
     my $result = request(
         '/v3/link/clicks',
@@ -879,7 +948,8 @@ sub bitly_link_referrers($;$$)
     }
 
     my ( $unit_reference_ts, $units ) =
-      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT );
+      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT,
+        $BITLY_EXPAND_DATE_RANGE_TO_LIMIT );
 
     my $result = request(
         '/v3/link/referrers',
@@ -965,7 +1035,8 @@ sub bitly_link_shares($;$$)
     }
 
     my ( $unit_reference_ts, $units ) =
-      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT );
+      _unit_reference_ts_and_units_from_start_end_timestamps( $start_timestamp, $end_timestamp, $MAX_BITLY_LIMIT,
+        $BITLY_EXPAND_DATE_RANGE_TO_LIMIT );
 
     my $result = request(
         '/v3/link/shares',
