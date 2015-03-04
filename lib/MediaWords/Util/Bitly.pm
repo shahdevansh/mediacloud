@@ -147,8 +147,7 @@ sub _unit_reference_ts_and_units_from_start_end_timestamps($$$)
         $start_date->set( hour => 0, minute => 0, second => 0 );
         $end_date->set( hour => 0, minute => 0, second => 0 );
 
-        my $delta      = $end_date->delta_days( $start_date );
-        my $delta_days = $delta->delta_days;
+        my $delta_days = $end_date->delta_days( $start_date )->delta_days;
         say STDERR "Delta days between $start_timestamp and $end_timestamp: $delta_days";
 
         if ( $delta_days == 0 )
