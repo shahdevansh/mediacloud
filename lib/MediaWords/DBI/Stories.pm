@@ -287,106 +287,6 @@ EOF
     return $tags;
 }
 
-# add a tags list as returned by MediaWords::Tagger::get_tags_for_modules to the database.
-# handle errors from the tagging module.
-# store any content returned by the tagging module.
-sub _add_module_tags
-{
-    my ( $db, $story, $module, $tags ) = @_;
-
-    unless ( $tags->{ tags } )
-    {
-        warn "tagging error - module: $module story: $story->{stories_id} error: $tags->{error}";
-        return;
-    }
-
-    my $tag_set = $db->find_or_create( 'tag_sets', { name => $module } );
-
-    $db->query(
-        <<"EOF",
-        DELETE FROM stories_tags_map AS stm USING tags AS t
-        WHERE stm.tags_id = t.tags_id
-              AND t.tag_sets_id = ?
-              AND stm.stories_id = ?
-EOF
-        $tag_set->{ tag_sets_id },
-        $story->{ stories_id }
-    );
-
-    my @terms = @{ $tags->{ tags } };
-
-    #print STDERR "tags [$module]: " . join( ',', map { "<$_>" } @terms ) . "\n";
-
-    my @tags_ids = map { _get_tags_id( $db, $tag_set->{ tag_sets_id }, $_ ) } @terms;
-
-    #my $existing_tags = _get_existing_tags( $db, $story, $module );
-    #my $lc = List::Compare->new( \@tags_ids, $existing_tags );
-    #@tags_ids = $lc->get_Lonly();
-
-    $db->dbh->do( "COPY stories_tags_map (stories_id, tags_id) FROM STDIN" );
-    for my $tags_id ( @tags_ids )
-    {
-        $db->dbh->pg_putcopydata( $story->{ stories_id } . "\t" . $tags_id . "\n" );
-    }
-
-    $db->dbh->pg_endcopy();
-
-    # lazy load for performance
-    require MediaWords::DBI::StoriesTagsMapMediaSubtables;
-
-    my $media_id = $story->{ media_id };
-    my $subtable_name =
-      MediaWords::DBI::StoriesTagsMapMediaSubtables::get_or_create_sub_table_name_for_media_id( $media_id );
-
-    $db->query(
-        <<"EOF",
-        DELETE FROM $subtable_name AS stm USING tags AS t
-        WHERE stm.tags_id = t.tags_id
-              AND t.tag_sets_id = ?
-              AND stm.stories_id = ?
-EOF
-        $tag_set->{ tag_sets_id },
-        $story->{ stories_id }
-    );
-
-    $db->dbh->do( "COPY $subtable_name (media_id, publish_date, stories_id, tags_id, tag_sets_id) FROM STDIN" );
-    for my $tags_id ( @tags_ids )
-    {
-        my $put_statement =
-          join( "\t", $media_id, $story->{ publish_date }, $story->{ stories_id }, $tags_id, $tag_set->{ tag_sets_id } ) .
-          "\n";
-        $db->dbh->pg_putcopydata( $put_statement );
-    }
-    $db->dbh->pg_endcopy();
-
-    _store_tags_content( $db, $story, $module, $tags );
-}
-
-# add tags for all default modules to the story in the database.
-# handle errors and store any content returned by the tagging module.
-sub add_default_tags
-{
-    my ( $db, $story ) = @_;
-
-    my $text = get_text( $db, $story );
-
-    my $default_tag_modules_list = MediaWords::Util::Config::get_config->{ mediawords }->{ default_tag_modules };
-    $default_tag_modules_list ||= 'NYTTopics';
-
-    my $default_tag_modules = [ split( /[,\s+]/, $default_tag_modules_list ) ];
-
-    # lazy load because this functionality is rarely run
-    require MediaWords::Tagger;
-    my $module_tags = MediaWords::Tagger::get_tags_for_modules( $text, $default_tag_modules );
-
-    for my $module ( keys( %{ $module_tags } ) )
-    {
-        _add_module_tags( $db, $story, $module, $module_tags->{ $module } );
-    }
-
-    return $module_tags;
-}
-
 sub get_media_source_for_story
 {
     my ( $db, $story ) = @_;
@@ -1159,7 +1059,7 @@ END
     my $tags_id = get_current_extractor_version_tags_id( $db );
 
     $db->query( <<END, $story->{ stories_id }, $tags_id );
-insert into stories_tags_map ( stories_id, tags_id ) values ( ?, ? )
+insert into stories_tags_map ( stories_id, tags_id, db_row_last_updated ) values ( ?, ?, now() )
 END
 
 }
@@ -1381,7 +1281,7 @@ sub get_medium_dup_stories_by_title
             }
 
             $title_part_counts->{ $title_part }->{ count }++;
-            $title_part_counts->{ $title_part }->{ stories }->{ $story->{ stories_id } } = $story;
+            $title_part_counts->{ $title_part }->{ stories }->{ $story->{ guid } } = $story;
         }
     }
 
@@ -1423,6 +1323,38 @@ sub get_medium_dup_stories_by_url
     }
 
     return [ grep { ( @{ $_ } > 1 ) && ( @{ $_ } < 6 ) } values( %{ $url_lookup } ) ];
+}
+
+# parse the content for tags that might indicate the story's title
+sub get_story_title_from_content
+{
+    my ( $content, $url ) = @_;
+
+    my $title;
+
+    if ( $content =~ m~<meta property=\"og:title\" content=\"([^\"]+)\"~si )
+    {
+        $title = $1;
+    }
+    elsif ( $content =~ m~<meta property=\"og:title\" content=\'([^\']+)\'~si )
+    {
+        $title = $1;
+    }
+    elsif ( $content =~ m~<title>([^<]+)</title>~si )
+    {
+        $title = $1;
+    }
+    else
+    {
+        $title = $url;
+    }
+
+    if ( length( $title ) > 1024 )
+    {
+        $title = substr( $title, 0, 1024 );
+    }
+
+    return $title;
 }
 
 1;

@@ -45,7 +45,7 @@ DECLARE
     
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4483;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4491;
     
 BEGIN
 
@@ -209,10 +209,17 @@ LANGUAGE 'plpgsql';
 CREATE OR REPLACE FUNCTION  story_triggers_enabled() RETURNS boolean  LANGUAGE  plpgsql AS $$
 BEGIN
 
-    return current_setting('PRIVATE.use_story_triggers') = 'yes';
-     EXCEPTION when undefined_object then
+    BEGIN
+       IF current_setting('PRIVATE.use_story_triggers') = '' THEN
+          perform enable_story_triggers();
+       END IF;
+       EXCEPTION when undefined_object then
         perform enable_story_triggers();
-        return true;
+
+     END;
+
+    return true;
+    return current_setting('PRIVATE.use_story_triggers') = 'yes';
 END$$;
 
 CREATE OR REPLACE FUNCTION  enable_story_triggers() RETURNS void LANGUAGE  plpgsql AS $$
@@ -234,7 +241,7 @@ $$
    BEGIN
       -- RAISE NOTICE 'BEGIN ';                                                                                                                            
 
-      IF ( TG_OP = 'UPDATE' ) OR (TG_OP = 'INSERT') then
+      IF ( story_triggers_enabled() ) AND ( ( TG_OP = 'UPDATE' ) OR (TG_OP = 'INSERT') ) then
 
       	 NEW.db_row_last_updated = now();
 
@@ -1028,6 +1035,11 @@ CREATE TABLE raw_downloads (
 );
 CREATE UNIQUE INDEX raw_downloads_object_id ON raw_downloads (object_id);
 
+-- Don't (attempt to) compress BLOBs in "raw_data" because they're going to be
+-- compressed already
+ALTER TABLE raw_downloads
+    ALTER COLUMN raw_data SET STORAGE EXTERNAL;
+
 
 create table feeds_stories_map
  (
@@ -1044,7 +1056,7 @@ create table stories_tags_map
     stories_tags_map_id     serial  primary key,
     stories_id              int     not null references stories on delete cascade,
     tags_id                 int     not null references tags on delete cascade,
-    db_row_last_updated                timestamp with time zone not null
+    db_row_last_updated                timestamp with time zone not null default now()
 );
 
 DROP TRIGGER IF EXISTS stories_tags_map_last_updated_trigger on stories_tags_map CASCADE;
@@ -1330,7 +1342,7 @@ create table story_sentences_tags_map
     story_sentences_tags_map_id     bigserial  primary key,
     story_sentences_id              bigint     not null references story_sentences on delete cascade,
     tags_id                 int     not null references tags on delete cascade,
-    db_row_last_updated                timestamp with time zone not null
+    db_row_last_updated                timestamp with time zone not null default now()
 );
 
 DROP TRIGGER IF EXISTS story_sentences_tags_map_last_updated_trigger on story_sentences_tags_map CASCADE;
@@ -2333,6 +2345,10 @@ create trigger controversy_stories_insert_live_story after insert on controversy
 create function update_live_story() returns trigger as $update_live_story$
     begin
 
+        IF NOT story_triggers_enabled() then
+	  RETURN NEW;
+        END IF;
+
         update cd.live_stories set
                 media_id = NEW.media_id,
                 url = NEW.url,
@@ -2798,6 +2814,19 @@ $$
 $$
 LANGUAGE SQL;
 
+CREATE TABLE auth_users_tag_sets_permissions (
+    auth_users_tag_sets_permissions_id SERIAL  PRIMARY KEY,
+    auth_users_id                      integer references auth_users not null,
+    tag_sets_id                        integer references tag_sets not null,
+    apply_tags                         boolean NOT NULL,
+    create_tags                        boolean NOT NULL,
+    edit_tag_set_descriptors           boolean NOT NULL,
+    edit_tag_descriptors               boolean NOT NULL
+);
+
+CREATE UNIQUE INDEX auth_users_tag_sets_permissions_auth_user_tag_set on  auth_users_tag_sets_permissions( auth_users_id , tag_sets_id );
+CREATE INDEX auth_users_tag_sets_permissions_auth_user         on  auth_users_tag_sets_permissions( auth_users_id );
+CREATE INDEX auth_users_tag_sets_permissions_tag_sets          on  auth_users_tag_sets_permissions( tag_sets_id );
 
 --
 -- Activity log
@@ -2940,17 +2969,31 @@ BEGIN
         RAISE NOTICE 'Story % is not annotatable with CoreNLP because media is not set for annotation.', corenlp_stories_id;
         RETURN FALSE;
 
+    -- Check if the story is extracted
+    ELSEIF EXISTS (
+
+        SELECT 1
+        FROM downloads
+        WHERE stories_id = corenlp_stories_id
+          AND type = 'content'
+          AND extracted = 'f'
+
+    ) THEN
+        RAISE NOTICE 'Story % is not annotatable with CoreNLP because it is not extracted.', corenlp_stories_id;
+        RETURN FALSE;
+
     -- Annotate English language stories only because they're the only ones
     -- supported by CoreNLP at the time.
     ELSEIF NOT EXISTS (
 
         SELECT 1
         FROM stories
+        WHERE stories_id = corenlp_stories_id
 
         -- Stories with language field set to NULL are the ones fetched before
         -- introduction of the multilanguage support, so they are assumed to be
         -- English.
-        WHERE stories.language = 'en' OR stories.language IS NULL
+          AND ( stories.language = 'en' OR stories.language IS NULL )
 
     ) THEN
         RAISE NOTICE 'Story % is not annotatable with CoreNLP because it is not in English.', corenlp_stories_id;
