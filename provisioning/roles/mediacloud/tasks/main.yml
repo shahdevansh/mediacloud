@@ -25,18 +25,19 @@
   pip: requirements={{mediacloud_dir}}/python_scripts/requirements.txt state=present
   become: yes
 
-- stat: path="~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version}}"
+- name: Check to see if we have perlbrew & {{ perl_version }} installed
+  stat: path="~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version}}"
   register: perl
 
-- name: Install Perlbrew
+- name: Install perlbrew
   include: perl.yml
   when: perl.stat.exists is not defined or not perl.stat.exists
 
-- name: source perlbrew envrionment
+- name: Set perlbrew environment varialbes
   include: set_perlbrew_environment.yml
 
-- name: Install cpanm packages with Perlbrew
+- name: Install cpanm modules with perlbrew
   include: cpanm.yml
 
-- name: Install perlbrew modules with carton
+- name: Install modules with carton
   include: carton.yml

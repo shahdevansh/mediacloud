@@ -5,22 +5,28 @@
   register: carton
   failed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
   changed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
+  environment:
+    PATH: "{{ ansible_env.PATH }}"
 
-- name: Link include files for openssl
+- name: Link .h files for openssl to /usr/local
   file: >
     src=/usr/local/opt/openssl/include/openssl
     dest=/usr/local/include/openssl
     state=link
+  register: openssl_symlink
 
-- name: Make a symlink in Java to run on MACOSX build
+- name: Create /Commands directory symlink in MACOSX Java build
   file: >
     src={{ ansible_env.JAVA_HOME }}/bin
-    dest={{ ansible_env.JAVA_HOME }}/Commands
+    path={{ ansible_env.JAVA_HOME }}/Commands
     state=link
   become: yes
+  register: java_symlink
 
 - name: Install cpan with carton
   shell: "JAVA_HOME={{ ansible_env.JAVA_HOME }} carton install"
   args:
     chdir: "{{mediacloud_dir}}"
   failed_when: "'JAVA_HOME' not in ansible_env"
+  environment:
+    PATH: "{{ ansible_env.PATH }}"

@@ -18,7 +18,7 @@
     -Duselargefiles -Dccflags=-DDEBIAN
     creates=~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version }}
 
-- name: Switch to installed Perl
+- name: Switch to installed perl
   shell: perlbrew switch {{ perl_version }}
 
 - name: Install cpanm
@@ -26,7 +26,7 @@
   register: cpanm
   changed_when: "'already exists' not in cpanm.stdout"
 
-- name: Create mediacloud Perlbrew library
+- name: Create mediacloud perlbrew
   shell: >
     perlbrew lib create mediacloud
     creates=~/.perlbrew/libs/{{ perl_version }}@mediacloud
