@@ -1,0 +1,30 @@
+---
+  # Postprovisioning TBD
+  
+  - name: Run tests
+    command: carton exec prove -Ilib/ -r t/compile.t chdir={{mediacloud_dir}}
+    environment:
+      "{{perlbrew_env}}"
+
+  - name: create_default_db_user_and_databases.sh # Probably want to move this to ansible as well
+    command: "{{mediacloud_dir}}/install_scripts/create_default_db_user_and_databases.sh"
+    become: yes
+
+  - name: mediawords_create_db.pl
+    shell: "carton {{mediacloud_dir}}/script/mediawords_create_db.pl"
+
+  - name: creating new user 'jdoe@mediacloud.org' with password 'mediacloud'
+    shell: >
+      carton {{mediacloud_dir}}/script/mediawords_manage_users.pl \
+          --action=add \
+          --email="jdoe@mediacloud.org" \
+          --full_name="John Doe" \
+          --notes="Media Cloud administrator" \
+          --roles="admin" \
+          --non_public_api_access \
+          --password="mediacloud"
+    environment:
+      "{{perlbrew_env}}"
+
+  - name: Setup git precommit hooks
+    command: "{{mediacloud_dir}}/install_scripts/setup_git_precommit_hooks.sh"

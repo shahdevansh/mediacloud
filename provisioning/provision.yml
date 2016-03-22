@@ -1,0 +1,49 @@
+---
+- hosts: all
+
+  vars:
+    - project_name: mediacloud
+    - mediacloud_dir: "{{ playbook_dir | dirname }}" # /Users/{{ project_name }}/src
+    - project_repo: https://github.com/berkmancenter/mediacloud.git
+    - perl_version: perl-5.16.3
+    - perl_major_version: "{{ perl_version | regex_replace('perl-(\\d+)\\..*','perl\\1') }}"
+
+  gather_facts: yes
+
+  pre_tasks:
+
+  # TODO: PRETASKS FOR REMOTE STAGING
+  #  - name: Create project directory
+  #    file: state=directory path={{ project_root}}
+  #    become: yes
+
+  #  - name: Create user
+  #    user: home=/Users/{{ project_name}} name={{ project_name }} state=present
+  #    become: yes
+
+  #  - name: Update the project directory.
+  #    file: owner={{ project_name }} mode=755 state=directory path={{ project_root }}
+
+  #  - name: Get git project
+  #    git: repo={{ project_repo }} dest={{ mediacloud_dir }}
+  #    become: yes
+  #    become_user: "{{ project_name }}"
+  #    when: "'.local' not in {{ ansible_fqdn }}"
+
+    - name: Check to make sure this is a 64 bit machine
+      command: getconf LONG_BIT
+      register: long_bit
+      failed_when: long_bit.stdout != '64'
+      changed_when: long_bit.stdout != '64'
+
+    - name: Make sure that mediacloud path has no spaces in name
+      command: echo
+      failed_when: "' ' in mediacloud_dir"
+      changed_when: "' ' in mediacloud_dir"
+
+    - name: if mediawords.yml doesn't exist then create it
+      command: cp {{mediacloud_dir}}/mediawords.yml.dist {{mediacloud_dir}}/mediawords.yml creates={{mediacloud_dir}}/mediawords.yml
+
+  roles:
+    - postgresql
+    - mediacloud

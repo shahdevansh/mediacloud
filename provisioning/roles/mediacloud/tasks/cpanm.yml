@@ -1,0 +1,15 @@
+---
+# TODO: see if this is needed in cpanm fresh install
+#- set_fact:
+#    ansible_env: "{{ ansible_env | addenv('LDFLAGS=-L/usr/local/opt/openssl/lib')| addenv('CPPFLAGS=-I/usr/local/opt/openssl/include') }}"
+
+- name: Install modules with cpanm
+  cpanm: name="{{item}}"
+  with_items:
+    - CPAN~2.00
+    - Carton~1.0.9
+    - List::MoreUtils
+    - Sub::Name~0.09
+    - Devel::NYTProf
+    - Devel::Cover
+    - lib::core::only

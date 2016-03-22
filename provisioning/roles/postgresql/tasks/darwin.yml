@@ -1,0 +1,34 @@
+---
+
+- name: installation
+  package: name=postgresql state=latest
+  register: postgresql_installed
+
+- name: install perl bindings
+  command: cpan DBD::Pg
+  become: yes
+
+- name: Initialize PostgreSQL if installing for the first time
+  command: initdb /usr/local/var/postgres -E utf8 creates=/usr/local/var/postgres
+  when: postgresql_installed.changed
+
+- name: Check for upgrade
+  shell: >
+        launchctl unload -w ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist &&
+        ln -sfv /usr/local/opt/postgresql/*.plist ~/Library/LaunchAgents
+        removes=~/Library/LaunchAgents/org.postgresql.postgres.plist
+  when: postgresql_installed.changed
+
+- name: Set up launchctl
+  shell: >
+      launchctl load ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist && sleep 5
+  when: postgresql_installed.changed
+
+- name: Create user database
+  command: createdb
+  register: createdb
+  failed_when: no
+  
+- name: Create postgres user
+  command: createuser postgres
+  failed_when: no

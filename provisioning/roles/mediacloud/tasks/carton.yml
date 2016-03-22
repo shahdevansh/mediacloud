@@ -1,0 +1,26 @@
+---
+# Need carton version 1
+- name: Check carton version
+  shell: "carton --version | tr -d \'[[:space:]]\'"
+  register: carton
+  failed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
+  changed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
+
+- name: Link include files for openssl
+  file: >
+    src=/usr/local/opt/openssl/include/openssl
+    dest=/usr/local/include/openssl
+    state=link
+
+- name: Make a symlink in Java to run on MACOSX build
+  file: >
+    src={{ ansible_env.JAVA_HOME }}/bin
+    dest={{ ansible_env.JAVA_HOME }}/Commands
+    state=link
+  become: yes
+
+- name: Install cpan with carton
+  shell: "JAVA_HOME={{ ansible_env.JAVA_HOME }} carton install"
+  args:
+    chdir: "{{mediacloud_dir}}"
+  failed_when: "'JAVA_HOME' not in ansible_env"

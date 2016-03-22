@@ -1,0 +1,5 @@
+---
+# This Playbook runs all the common plays in the deployment
+
+- include: darwin.yml
+  when: ansible_os_family == "Darwin"

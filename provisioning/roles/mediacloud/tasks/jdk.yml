@@ -1,0 +1,24 @@
+---
+# Make sure we've installed Java
+
+- name: Check to make sure we have Java installed
+  shell: /usr/libexec/java_home
+  register: java
+  changed_when: "'No Java runtime present' in java.stderr"
+  failed_when: no
+
+- name: Install Java
+  homebrew_cask: name=java state=present
+  when: java.changed
+
+- name: Get JAVA_HOME again to add to Ansible environment variables
+  shell: /usr/libexec/java_home
+  register: java
+  failed_when:  "'No Java runtime present' in java.stderr "
+
+- set_fact:
+    ansible_env: "{{ ansible_env | addenv('JAVA_HOME={{ java.stdout }}')}}"
+
+- name: Check that JAVA_HOME is in Ansible environment variables
+  command: echo
+  failed_when: "'JAVA_HOME' not in ansible_env or 'jdk' not in ansible_env.JAVA_HOME"

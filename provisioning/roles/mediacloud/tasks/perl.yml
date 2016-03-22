@@ -1,0 +1,32 @@
+---
+- name: Download perlbrew to /tmp
+  get_url: url=http://install.perlbrew.pl dest=/tmp/install_perlbrew.sh
+
+- name: Install perlbrew
+  command: bash /tmp/install_perlbrew.sh creates=~/{{ perl_major_version }}/perlbrew/bin/perlbrew
+  register: perlbrew
+
+- name: Initialize perlbrew
+  shell: perlbrew init
+  when: perlbrew.changed
+
+- name: Install {{ perl_version }}
+  shell: >
+    nice perlbrew install -j 8 {{ perl_version }}
+    -Duseithreads -Dusemultiplicity -Duse64bitint
+    -Duse64bitall -Duseposix -Dusethreads
+    -Duselargefiles -Dccflags=-DDEBIAN
+    creates=~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version }}
+
+- name: Switch to installed Perl
+  shell: perlbrew switch {{ perl_version }}
+
+- name: Install cpanm
+  shell: perlbrew install-cpanm
+  register: cpanm
+  changed_when: "'already exists' not in cpanm.stdout"
+
+- name: Create mediacloud Perlbrew library
+  shell: >
+    perlbrew lib create mediacloud
+    creates=~/.perlbrew/libs/{{ perl_version }}@mediacloud

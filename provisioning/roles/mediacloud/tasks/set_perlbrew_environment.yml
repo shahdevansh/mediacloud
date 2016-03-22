@@ -1,0 +1,37 @@
+---
+# Get perlbrew environment variables into our Ansible environment variables
+
+- name: Check to see if we need environment variables set
+  shell: "true"
+  register: env_variables
+  changed_when:  "'PERLBREW_LIB' not in ansible_env"
+
+# A bash command to see what environment variables we need to merge in after sourcing perlbrew bashrc
+# (Implementation note: doesn't really remove bashrc, but if this file doesn't exist, command won't be run)
+- name: Set perlbrew environment variables
+  shell: >
+    diff  --old-line-format="" --unchanged-line-format="" <(printenv | sort) <(source ~/{{ perl_major_version }}/perlbrew/etc/bashrc && printenv | sort)
+    removes=~/{{ perl_major_version }}/perlbrew/etc/bashrc
+  register: perlbrewlib_env
+  failed_when: no
+  when: env_variables.changed
+  args:
+    executable: /bin/bash
+
+- set_fact:
+    perlbrew_env: "{{ perlbrewlib_env | getenvs }}"
+  when: env_variables.changed
+
+- set_fact:
+    ansible_env: "{{ ansible_env | combine(perlbrew_env) }}"
+  when: env_variables.changed
+
+- name: Make sure we have environment variables set
+  shell: "true"
+  failed_when: "'PERLBREW_LIB' not in ansible_env"
+
+- name: Switch to mediacloud
+  shell: "perlbrew switch {{ perl_version }}@mediacloud"
+  failed_when: "'PERLBREW_LIB' not in ansible_env"
+  args:
+    executable: /bin/bash

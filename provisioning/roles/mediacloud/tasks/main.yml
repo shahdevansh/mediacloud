@@ -1,0 +1,42 @@
+---
+- name: Java must be installed
+  include: jdk.yml
+
+- name: Install brew dependencies w/no install options
+  package: name={{item}} state=installed
+  with_items:
+    - coreutils
+    - curl
+    - tidy-html5
+    - libxml2
+    - libyaml
+    - gawk
+    - cpanminus
+    - maven
+    - netcat
+
+- name: Install graphviz
+  package: name=graphviz install_options=with-bindings state=installed
+
+- name: Install gearman
+  package: name=gearman install_options=with-postgresql state=installed
+
+- name: Install python packages
+  pip: requirements={{mediacloud_dir}}/python_scripts/requirements.txt state=present
+  become: yes
+
+- stat: path="~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version}}"
+  register: perl
+
+- name: Install Perlbrew
+  include: perl.yml
+  when: perl.stat.exists is not defined or not perl.stat.exists
+
+- name: source perlbrew envrionment
+  include: set_perlbrew_environment.yml
+
+- name: Install cpanm packages with Perlbrew
+  include: cpanm.yml
+
+- name: Install perlbrew modules with carton
+  include: carton.yml
