@@ -1,12 +1,45 @@
 ---
 # Need carton version 1
 - name: Check carton version
-  shell: "carton --version | tr -d \'[[:space:]]\'"
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    carton --version | tr -d \'[[:space:]]\'
   register: carton
   failed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
   changed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
   environment:
     PATH: "{{ ansible_env.PATH }}"
+  args:
+    executable: /bin/bash
+
+- name: Ensure that local in mediacloud is up to date
+  shell: >
+    awk 'BEGIN{FS="/"}{print $(NF-2)}' <(head -n 1 {{ mediacloud_dir }}/local/bin/carton )
+  register: local_matches
+  changed_when: local_matches.stdout == '' or local_matches.stdout != perl_version
+  failed_when: false
+  args:
+    executable: /bin/bash
+
+- name: Back up {{ local_matches.stdout }} local directory
+  shell: >
+    tar -cvzf local_{{ local_matches.stdout }}.tgz local &&
+    rm -rf {{ mediacloud_dir }}/local
+    removes={{ mediacloud_dir }}/local
+    chdir={{ mediacloud_dir }}
+  when: local_matches.changed
+  become: yes
+  args:
+    executable: /bin/bash
+
+- name: Restore {{ perl_version }} archived local directory
+  unarchive:
+    src={{ mediacloud_dir }}/local_{{ perl_version }}.tgz
+    dest={{ mediacloud_dir }}
+    copy=no
+    creates={{ mediacloud_dir }}/local
+  when: local_matches.changed
+  failed_when: no
 
 - name: Link .h files for openssl to /usr/local
   file: >
@@ -24,9 +57,10 @@
   register: java_symlink
 
 - name: Install cpan with carton
-  shell: "JAVA_HOME={{ ansible_env.JAVA_HOME }} carton install"
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    JAVA_HOME={{ ansible_env.JAVA_HOME }} carton install
+  failed_when: "'JAVA_HOME' not in ansible_env"
   args:
     chdir: "{{mediacloud_dir}}"
-  failed_when: "'JAVA_HOME' not in ansible_env"
-  environment:
-    PATH: "{{ ansible_env.PATH }}"
+    executable: /bin/bash

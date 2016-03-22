@@ -1,32 +1,79 @@
 ---
+
+# Install perlbrew if it isn't installed already
+- name: Check if perlbrew is installed
+  stat: path=~/{{ perl_major_version }}/perlbrew/bin/perlbrew
+  register: perlbrew_installed
+
 - name: Download perlbrew to /tmp
   get_url: url=http://install.perlbrew.pl dest=/tmp/install_perlbrew.sh
+  when: perlbrew_installed.stat.exists is not defined or not perlbrew_installed.stat.exists
 
 - name: Install perlbrew
   command: bash /tmp/install_perlbrew.sh creates=~/{{ perl_major_version }}/perlbrew/bin/perlbrew
-  register: perlbrew
+  when: perlbrew_installed.stat.exists is not defined or not perlbrew_installed.stat.exists
 
 - name: Initialize perlbrew
-  shell: perlbrew init
-  when: perlbrew.changed
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    perlbrew init
+  when: perlbrew_installed.stat.exists is not defined or not perlbrew_installed.stat.exists
+  args:
+    executable: /bin/bash
+
+- name: Install perlbrew's cpanm
+  shell:  >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    perlbrew install-cpanm
+  when: perlbrew_installed.stat.exists is not defined or not perlbrew_installed.stat.exists
+  args:
+    executable: /bin/bash
+
+# Switch to perl version. If it isn't installed, install it, then try again.
+- name: Switch to {{ perl_version }}
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    perlbrew switch {{ perl_version }}
+  register: switched_perl
+  failed_when: no
+  changed_when: "'ERROR' in switched_perl.stderr"
+  args:
+    executable: /bin/bash
 
 - name: Install {{ perl_version }}
   shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
     nice perlbrew install -j 8 {{ perl_version }}
     -Duseithreads -Dusemultiplicity -Duse64bitint
     -Duse64bitall -Duseposix -Dusethreads
     -Duselargefiles -Dccflags=-DDEBIAN
     creates=~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version }}
+  args:
+    executable: /bin/bash
+  when: switched_perl.changed
 
-- name: Switch to installed perl
-  shell: perlbrew switch {{ perl_version }}
-
-- name: Install cpanm
-  shell: perlbrew install-cpanm
-  register: cpanm
-  changed_when: "'already exists' not in cpanm.stdout"
-
-- name: Create mediacloud perlbrew
+# Switch to perl version after install. If it doesn't work, fail.
+- name: Switch to {{ perl_version }}
   shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    perlbrew switch {{ perl_version }}
+  when: switched_perl.changed
+  args:
+    executable: /bin/bash
+
+# Create mediacloud perlbrew library if it doesn't exist, switch to it
+- name: Create {{ perl_version }}@mediacloud perlbrew
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
     perlbrew lib create mediacloud
     creates=~/.perlbrew/libs/{{ perl_version }}@mediacloud
+  register: switched_perlbrew_mediacloud
+  args:
+    executable: /bin/bash
+
+- name: Switch to perlbrew {{ perl_version }}@mediacloud
+  shell: >
+    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
+    perlbrew switch {{ perl_version }}@mediacloud
+  args:
+    executable: /bin/bash

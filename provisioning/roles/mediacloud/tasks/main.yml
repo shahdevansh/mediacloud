@@ -26,14 +26,9 @@
   become: yes
 
 - name: Check to see if we have perlbrew & {{ perl_version }} installed
-  stat: path="~/{{ perl_major_version }}/perlbrew/perls/{{ perl_version}}"
-  register: perl
-
-- name: Install perlbrew
   include: perl.yml
-  when: perl.stat.exists is not defined or not perl.stat.exists
 
-- name: Set perlbrew environment varialbes
+- name: Set perlbrew environment variables
   include: set_perlbrew_environment.yml
 
 - name: Install cpanm modules with perlbrew

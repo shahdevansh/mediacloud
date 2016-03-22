@@ -5,7 +5,7 @@
     - project_name: mediacloud
     - mediacloud_dir: "{{ playbook_dir | dirname }}" # /Users/{{ project_name }}/src
     - project_repo: https://github.com/berkmancenter/mediacloud.git
-    - perl_version: perl-5.16.3
+    - perl_version: perl-5.22.1
     - perl_major_version: "{{ perl_version | regex_replace('perl-(\\d+)\\..*','perl\\1') }}"
 
   gather_facts: yes
