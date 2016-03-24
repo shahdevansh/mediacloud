@@ -2,17 +2,16 @@
 # Need carton version 1
 - name: Check carton version
   shell: >
-    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
     carton --version | tr -d \'[[:space:]]\'
   register: carton
   failed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
   changed_when: "'cartonv' not in carton.stdout or 'cartonv0' in carton.stdout"
   environment:
-    PATH: "{{ ansible_env.PATH }}"
+    PATH: "{{ perlbrew_env }}"
   args:
     executable: /bin/bash
 
-- name: Ensure that local in mediacloud is up to date
+- name: Ensure that local directory uses {{ perl_version }}
   shell: >
     awk 'BEGIN{FS="/"}{print $(NF-2)}' <(head -n 1 {{ mediacloud_dir }}/local/bin/carton )
   register: local_matches
@@ -58,9 +57,9 @@
 
 - name: Install cpan with carton
   shell: >
-    source ~/{{ perl_major_version }}/perlbrew/etc/bashrc &&
     JAVA_HOME={{ ansible_env.JAVA_HOME }} carton install
   failed_when: "'JAVA_HOME' not in ansible_env"
+  environment: "{{ perlbrew_env }}"
   args:
     chdir: "{{mediacloud_dir}}"
     executable: /bin/bash

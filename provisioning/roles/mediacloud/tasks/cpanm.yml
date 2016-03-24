@@ -1,7 +1,4 @@
 ---
-# TODO: see if this is needed in cpanm fresh install
-#- set_fact:
-#    ansible_env: "{{ ansible_env | addenv('LDFLAGS=-L/usr/local/opt/openssl/lib')| addenv('CPPFLAGS=-I/usr/local/opt/openssl/include') }}"
 
 - name: Install modules with cpanm
   cpanm: name="{{item}}"
@@ -13,3 +10,5 @@
     - Devel::NYTProf
     - Devel::Cover
     - lib::core::only
+  environment:
+    "{{ perlbrew_env }}"
