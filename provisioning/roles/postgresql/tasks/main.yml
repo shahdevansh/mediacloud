@@ -3,3 +3,5 @@
 
 - include: darwin.yml
   when: ansible_os_family == "Darwin"
+
+- include: setup.yml

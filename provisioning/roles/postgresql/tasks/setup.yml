@@ -1,0 +1,27 @@
+---
+- hosts: all
+
+  vars:
+    - mediacloud_dir: "{{ playbook_dir | dirname }}" # /Users/{{ project_name }}/src
+
+  tasks:
+    - include_vars: "{{ mediacloud_dir }}/mediawords.yml"
+
+    - name: Create postgresql roles
+      postgresql_user:
+        name="{{ item.user }}"
+        password="{{ item.pass }}"
+        role_attr_flags="SUPERUSER"
+      with_items:
+        - "{{ database }}"
+
+    - name: Create postgresql databases
+      postgresql_db:
+        name="{{ item.db }}"
+        encoding='UTF-8'
+        owner="{{ item.user }}"
+        lc_collate='en_US.UTF-8'
+        lc_ctype='en_US.UTF-8'
+        template="template0"
+      with_items:
+        - "{{ database }}"
