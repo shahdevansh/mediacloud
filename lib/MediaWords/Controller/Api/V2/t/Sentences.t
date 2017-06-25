@@ -10,7 +10,7 @@ BEGIN
 use Modern::Perl '2015';
 use MediaWords::CommonLibs;
 
-use HTTP::HashServer;
+use MediaWords::Test::HTTP::HashServer;
 use Readonly;
 use Test::More;
 use Test::Deep;
@@ -91,7 +91,7 @@ sub test_sentences_list($)
 
     is( $r->{ response }->{ numFound }, scalar( @{ $ss } ), "$label num found" );
 
-    my $fields = [ qw/stories_id media_id sentence/ ];
+    my $fields = [ qw/stories_id media_id sentence language publish_date/ ];
     rows_match( $label, $r->{ response }->{ docs }, $ss, 'story_sentences_id', $fields );
 }
 

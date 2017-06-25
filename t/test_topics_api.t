@@ -310,7 +310,7 @@ sub test_topics_crud($)
 
     my $r = test_post( '/api/v2/topics/create', $input );
 
-    ok( $r->{ topics }, "$label json includes topics" );
+    ok( $r->{ topics }, "$label JSON includes topics" );
     my $got_topic = $r->{ topics }->[ 0 ];
 
     my $exists_in_db = $db->find_by_id( "topics", $got_topic->{ topics_id } );
@@ -351,7 +351,7 @@ sub test_topics_crud($)
 
     $r = test_put( "/api/v2/topics/$topics_id/update", $update );
 
-    ok( $r->{ topics }, "$label json includes topics" );
+    ok( $r->{ topics }, "$label JSON includes topics" );
     $got_topic = $r->{ topics }->[ 0 ];
 
     map { is( $got_topic->{ $_ }, $update->{ $_ }, "$label $_" ) } @{ $test_fields };
@@ -433,15 +433,26 @@ sub test_topics_list($)
     {
         $label = "$label list only permitted topics";
         my $api_key = MediaWords::Test::API::get_test_api_key();
-        my $auth_user = $db->query( "select * from auth_users where api_token = ?", $api_key )->hash;
-        $db->query( "delete from auth_users_roles_map where auth_users_id = ?", $auth_user->{ auth_users_id } );
+
+        my $auth_user = $db->query(
+            <<SQL,
+            SELECT auth_users_id
+            FROM auth_user_api_keys
+            WHERE api_key = ?
+SQL
+            $api_key
+        )->hash;
+        my $auth_users_id = $auth_user->{ auth_users_id };
+
+        $db->query( "delete from auth_users_roles_map where auth_users_id = ?", $auth_users_id );
 
         my $r               = test_get( "/api/v2/topics/list" );
         my $expected_topics = $db->query( "select * from topics where name % 'public ?'" )->hashes;
         ok( $r->{ topics }, "$label topics field present" );
+
         rows_match( $label, $r->{ topics }, $expected_topics, 'topics_id', $match_fields );
 
-        $db->query( <<SQL, $auth_user->{ auth_users_id }, $MediaWords::DBI::Auth::Roles::ADMIN );
+        $db->query( <<SQL, $auth_users_id, $MediaWords::DBI::Auth::Roles::List::ADMIN );
 insert into auth_users_roles_map ( auth_users_id, auth_roles_id )
     select ?, auth_roles_id from auth_roles where role = ?
 SQL
@@ -496,6 +507,42 @@ sub test_snapshots($)
     test_snapshots_generate( $db );
 }
 
+# test stories/facebook list
+sub test_stories_facebook($)
+{
+    my ( $db ) = @_;
+
+    my $label = "stories/facebook";
+
+    my $topic   = $db->query( "select * from topics limit 1" )->hash;
+    my $stories = $db->query( "select * from snap.live_stories limit 10" )->hashes;
+
+    my $expected_ss = [];
+    for my $story ( @{ $stories } )
+    {
+        my $stories_id = $story->{ stories_id };
+        my $ss         = $db->create(
+            'story_statistics',
+            {
+                stories_id                => $stories_id,
+                facebook_share_count      => $stories_id + 1,
+                facebook_comment_count    => $stories_id + 2,
+                facebook_api_collect_date => $story->{ publish_date }
+            }
+        );
+
+        push( @{ $expected_ss }, $ss );
+    }
+
+    my $r = test_get( "/api/v2/topics/$topic->{ topics_id }/stories/facebook", {} );
+
+    my $got_ss = $r->{ counts };
+    ok( $got_ss, "$label counts field present" );
+
+    my $fields = [ qw/facebook_share_count facebook_comment_count facebook_api_collect_date/ ];
+    rows_match( $label, $got_ss, $expected_ss, 'stories_id', $fields );
+}
+
 sub test_topics_api
 {
     my $db = shift;
@@ -521,6 +568,7 @@ sub test_topics_api
     test_default_sort( $stories );
     test_social_sort( $stories );
     test_media_list( $stories );
+    test_stories_facebook( $db );
 
     test_topics( $db );
     test_snapshots( $db );

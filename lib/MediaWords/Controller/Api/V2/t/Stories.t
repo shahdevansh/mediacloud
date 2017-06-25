@@ -10,7 +10,7 @@ BEGIN
 use Modern::Perl '2015';
 use MediaWords::CommonLibs;
 
-use HTTP::HashServer;
+use MediaWords::Test::HTTP::HashServer;
 use Readonly;
 use Test::More;
 use Test::Deep;
@@ -39,7 +39,7 @@ sub test_stories_corenlp($)
 {
     my ( $db ) = @_;
 
-    # TODO add infrastructure to actually generate corenlp and test it
+    # TODO add infrastructure to actually generate CoreNLP and test it
 
     my $label = "stories/corenlp";
 

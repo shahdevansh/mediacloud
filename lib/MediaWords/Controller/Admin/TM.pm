@@ -279,16 +279,12 @@ SQL
 }
 
 # if there are pending topic_links, return a hash describing the status
-# of the mining process with the following fields: stories_by_iteration, queued_urls, recent_topic_spider_metrics
+# of the mining process with the following fields: stories_by_iteration, recent_topic_spider_metrics
 sub _get_mining_status
 {
     my ( $db, $topic ) = @_;
 
     my $cid = $topic->{ topics_id };
-
-    my $queued_urls = $db->query( <<END, $cid )->array->[ 0 ];
-select count(*) from topic_links where topics_id = ? and ref_stories_id is null
-END
 
     my $stories_by_iteration = $db->query( <<END, $cid )->hashes;
 select iteration, count(*) count
@@ -303,7 +299,6 @@ select * from topic_spider_metrics where topics_id = ? order by topic_spider_met
 SQL
 
     return {
-        queued_urls                 => $queued_urls,
         stories_by_iteration        => $stories_by_iteration,
         recent_topic_spider_metrics => $recent_topic_spider_metrics
     };
@@ -532,7 +527,7 @@ END
     return $sorted_media;
 }
 
-# generate a json of the weekly counts for any medium in the top
+# generate a JSON of the weekly counts for any medium in the top
 # ten media in any week
 sub view_snapshot_media_over_time_json : Local
 {
@@ -573,7 +568,7 @@ sub nv : Local
     $c->stash->{ template }    = 'nv/nv.tt2';
 }
 
-# get json config file for network visualization.
+# get JSON config file for network visualization.
 # nv implemented in root/nv from the gephi sigma export template
 sub nv_config : Local
 {
@@ -1045,7 +1040,7 @@ END
         MediaWords::TM::Snapshot::setup_temporary_snapshot_tables( $db, $timespan, $topic, $l );
         my $gexf_options = {
             color_field          => $color_field,
-            num_media            => $num_media,
+            max_media            => $num_media,
             include_weights      => $include_weights,
             max_links_per_medium => $max_links_per_medium
         };

@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION set_database_schema_version() RETURNS boolean AS $$
 DECLARE
     -- Database schema version number (same as a SVN revision number)
     -- Increase it by 1 if you make major database schema changes.
-    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4618;
+    MEDIACLOUD_DATABASE_SCHEMA_VERSION CONSTANT INT := 4629;
 
 BEGIN
 
@@ -335,8 +335,6 @@ create table media (
 
     -- if true, indicates that media cloud closely monitors the health of this source
     is_monitored                boolean not null default false,
-
-    primary_language            varchar( 4 ) null,
 
     CONSTRAINT media_name_not_empty CHECK ( ( (name)::text <> ''::text ) ),
     CONSTRAINT media_self_dup CHECK ( dup_media_id IS NULL OR dup_media_id <> media_id )
@@ -1644,14 +1642,19 @@ END;
 $$
 LANGUAGE plpgsql;
 
--- Insert row into correct partition
+-- Upsert row into correct partition
 CREATE OR REPLACE FUNCTION bitly_clicks_total_partition_by_stories_id_insert_trigger()
 RETURNS TRIGGER AS $$
 DECLARE
     target_table_name TEXT;       -- partition table name (e.g. "bitly_clicks_total_000001")
 BEGIN
     SELECT bitly_get_partition_name( NEW.stories_id, 'bitly_clicks_total' ) INTO target_table_name;
-    EXECUTE 'INSERT INTO ' || target_table_name || ' SELECT $1.*;' USING NEW;
+    EXECUTE '
+        INSERT INTO ' || target_table_name || '
+            SELECT $1.*
+        ON CONFLICT (stories_id) DO UPDATE
+            SET click_count = EXCLUDED.click_count
+        ' USING NEW;
     RETURN NULL;
 END;
 $$
@@ -1736,36 +1739,6 @@ LANGUAGE plpgsql;
 
 -- Create initial partitions for empty database
 SELECT bitly_clicks_total_create_partitions();
-
-
--- Helper to INSERT / UPDATE story's Bit.ly statistics
-CREATE OR REPLACE FUNCTION upsert_bitly_clicks_total (
-    param_stories_id INT,
-    param_click_count INT
-) RETURNS VOID AS
-$$
-BEGIN
-    LOOP
-        -- Try UPDATing
-        UPDATE bitly_clicks_total
-            SET click_count = param_click_count
-            WHERE stories_id = param_stories_id;
-        IF FOUND THEN RETURN; END IF;
-
-        -- Nothing to UPDATE, try to INSERT a new record
-        BEGIN
-            INSERT INTO bitly_clicks_total (stories_id, click_count)
-            VALUES (param_stories_id, param_click_count);
-            RETURN;
-        EXCEPTION WHEN UNIQUE_VIOLATION THEN
-            -- If someone else INSERTs the same key concurrently,
-            -- we will get a unique-key failure. In that case, do
-            -- nothing and loop to try the UPDATE again.
-        END;
-    END LOOP;
-END;
-$$
-LANGUAGE plpgsql;
 
 
 --
@@ -2149,16 +2122,6 @@ CREATE VIEW daily_stats AS
 -- Authentication
 --
 
--- Generate random API token
-CREATE FUNCTION generate_api_token() RETURNS VARCHAR(64) LANGUAGE plpgsql AS $$
-DECLARE
-    token VARCHAR(64);
-BEGIN
-    SELECT encode(digest(gen_random_bytes(256), 'sha256'), 'hex') INTO token;
-    RETURN token;
-END;
-$$;
-
 -- List of users
 CREATE TABLE auth_users (
     auth_users_id   SERIAL  PRIMARY KEY,
@@ -2166,12 +2129,6 @@ CREATE TABLE auth_users (
 
     -- Salted hash of a password (with Crypt::SaltedHash, algorithm => 'SHA-256', salt_len=>64)
     password_hash   TEXT    NOT NULL CONSTRAINT password_hash_sha256 CHECK(LENGTH(password_hash) = 137),
-
-    -- API authentication token
-    -- (must be 64 bytes in order to prevent someone from resetting it to empty string somehow)
-    api_token       VARCHAR(64)     UNIQUE NOT NULL DEFAULT generate_api_token()
-        CONSTRAINT api_token_64_characters
-            CHECK(LENGTH(api_token) = 64),
 
     full_name       TEXT    NOT NULL,
     notes           TEXT    NULL,
@@ -2194,28 +2151,59 @@ CREATE TABLE auth_users (
 );
 
 create index auth_users_email on auth_users( email );
-create index auth_users_token on auth_users( api_token );
 
-create table auth_registration_queue (
-    auth_registration_queue_id  serial  primary key,
-    name                        text    not null,
-    email                       text    not null,
-    organization                text    not null,
-    motivation                  text    not null,
-    approved                    boolean default false
+
+-- Generate random API key
+CREATE FUNCTION generate_api_key() RETURNS VARCHAR(64) LANGUAGE plpgsql AS $$
+DECLARE
+    api_key VARCHAR(64);
+BEGIN
+    SELECT encode(digest(gen_random_bytes(256), 'sha256'), 'hex') INTO api_key;
+    RETURN api_key;
+END;
+$$;
+
+
+CREATE TABLE auth_user_api_keys (
+    auth_user_api_keys_id SERIAL      PRIMARY KEY,
+    auth_users_id         INT         NOT NULL REFERENCES auth_users ON DELETE CASCADE,
+
+    -- API key
+    -- (must be 64 bytes in order to prevent someone from resetting it to empty string somehow)
+    api_key               VARCHAR(64) UNIQUE NOT NULL
+                                          DEFAULT generate_api_key()
+                                          CONSTRAINT api_key_64_characters
+                                          CHECK( length( api_key ) = 64 ),
+
+    -- If set, API key is limited to only this IP address
+    ip_address            INET        NULL
 );
 
+CREATE UNIQUE INDEX auth_user_api_keys_api_key_ip_address
+    ON auth_user_api_keys (api_key, ip_address);
 
-create table auth_user_ip_tokens (
-    auth_user_ip_tokens_id  serial      primary key,
-    auth_users_id           int         not null references auth_users on delete cascade,
-    api_token               varchar(64) unique not null default generate_api_token()
-        constraint api_token_64_characters
-            check( length( api_token ) = 64 ),
-    ip_address              inet    not null
-);
 
-create index auth_user_ip_tokens_token on auth_user_ip_tokens ( api_token, ip_address );
+-- Autogenerate non-IP limited API key
+CREATE OR REPLACE FUNCTION auth_user_api_keys_add_non_ip_limited_api_key() RETURNS trigger AS
+$$
+BEGIN
+
+    INSERT INTO auth_user_api_keys (auth_users_id, api_key, ip_address)
+    VALUES (
+        NEW.auth_users_id,
+        DEFAULT,  -- Autogenerated API key
+        NULL      -- Not limited by IP address
+    );
+    RETURN NULL;
+
+END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE TRIGGER auth_user_api_keys_add_non_ip_limited_api_key
+    AFTER INSERT ON auth_users
+    FOR EACH ROW EXECUTE PROCEDURE auth_user_api_keys_add_non_ip_limited_api_key();
+
 
 -- List of roles the users can perform
 CREATE TABLE auth_roles (
@@ -2272,44 +2260,6 @@ CREATE TABLE auth_user_request_daily_counts (
 
 -- Single index to enforce upsert uniqueness
 CREATE UNIQUE INDEX auth_user_request_daily_counts_email_day ON auth_user_request_daily_counts (email, day);
-
-
--- Helper to INSERT / UPDATE user's request daily counts
-CREATE OR REPLACE FUNCTION upsert_auth_user_request_daily_counts (
-    param_email TEXT,
-    param_requested_items_count INT
-) RETURNS VOID AS
-$$
-DECLARE
-    request_date DATE;
-BEGIN
-    request_date := DATE_TRUNC('day', LOCALTIMESTAMP)::DATE;
-
-    LOOP
-        -- Try UPDATing
-        UPDATE auth_user_request_daily_counts
-           SET requests_count = requests_count + 1,
-               requested_items_count = requested_items_count + param_requested_items_count
-         WHERE email = param_email
-           AND day = request_date;
-
-        IF FOUND THEN RETURN; END IF;
-
-        -- Nothing to UPDATE, try to INSERT a new record
-        BEGIN
-            INSERT INTO auth_user_request_daily_counts (email, day, requests_count, requested_items_count)
-            VALUES (param_email, request_date, 1, param_requested_items_count);
-            RETURN;
-        EXCEPTION WHEN UNIQUE_VIOLATION THEN
-            -- If someone else INSERTs the same key concurrently,
-            -- we will get a unique-key failure. In that case, do
-            -- nothing and loop to try the UPDATE again.
-        END;
-    END LOOP;
-END;
-$$
-LANGUAGE plpgsql;
-
 
 
 -- User limits for logged + throttled controller actions
@@ -2380,6 +2330,14 @@ CREATE TABLE auth_users_tag_sets_permissions (
 CREATE UNIQUE INDEX auth_users_tag_sets_permissions_auth_user_tag_set on  auth_users_tag_sets_permissions( auth_users_id , tag_sets_id );
 CREATE INDEX auth_users_tag_sets_permissions_auth_user         on  auth_users_tag_sets_permissions( auth_users_id );
 CREATE INDEX auth_users_tag_sets_permissions_tag_sets          on  auth_users_tag_sets_permissions( tag_sets_id );
+
+
+-- Users to subscribe to groups.io mailing list
+CREATE TABLE auth_users_subscribe_to_newsletter (
+    auth_users_subscribe_to_newsletter_id SERIAL  PRIMARY KEY,
+    auth_users_id                         INTEGER NOT NULL REFERENCES auth_users (auth_users_id) ON DELETE CASCADE
+);
+
 
 --
 -- Activity log
@@ -3191,3 +3149,103 @@ create table retweeter_partition_matrix (
 );
 
 create index retweeter_partition_matrix_score on retweeter_partition_matrix ( retweeter_scores_id );
+
+
+--
+-- Schema to hold object caches
+--
+
+CREATE SCHEMA cache;
+
+CREATE OR REPLACE LANGUAGE plpgsql;
+
+
+-- Trigger to update "db_row_last_updated" for cache tables
+CREATE OR REPLACE FUNCTION cache.update_cache_db_row_last_updated()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.db_row_last_updated = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE 'plpgsql';
+
+
+-- Helper to purge object caches
+CREATE OR REPLACE FUNCTION cache.purge_object_caches()
+RETURNS VOID AS
+$$
+BEGIN
+
+    RAISE NOTICE 'Purging "s3_raw_downloads_cache" table...';
+    EXECUTE '
+        DELETE FROM cache.s3_raw_downloads_cache
+        WHERE db_row_last_updated <= NOW() - INTERVAL ''3 days'';
+    ';
+
+    RAISE NOTICE 'Purging "s3_bitly_processing_results_cache" table...';
+    EXECUTE '
+        DELETE FROM cache.s3_bitly_processing_results_cache
+        WHERE db_row_last_updated <= NOW() - INTERVAL ''3 days'';
+    ';
+
+END;
+$$
+LANGUAGE plpgsql;
+
+
+--
+-- Raw downloads from S3 cache
+--
+
+CREATE UNLOGGED TABLE cache.s3_raw_downloads_cache (
+    s3_raw_downloads_cache_id SERIAL    PRIMARY KEY,
+    object_id                 BIGINT    NOT NULL
+                                            REFERENCES public.downloads (downloads_id)
+                                            ON DELETE CASCADE,
+
+    -- Will be used to purge old cache objects;
+    -- don't forget to update cache.purge_object_caches()
+    db_row_last_updated       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    raw_data                  BYTEA     NOT NULL
+);
+CREATE UNIQUE INDEX s3_raw_downloads_cache_object_id
+    ON cache.s3_raw_downloads_cache (object_id);
+CREATE INDEX s3_raw_downloads_cache_db_row_last_updated
+    ON cache.s3_raw_downloads_cache (db_row_last_updated);
+
+ALTER TABLE cache.s3_raw_downloads_cache
+    ALTER COLUMN raw_data SET STORAGE EXTERNAL;
+
+CREATE TRIGGER s3_raw_downloads_cache_db_row_last_updated_trigger
+    BEFORE INSERT OR UPDATE ON cache.s3_raw_downloads_cache
+    FOR EACH ROW EXECUTE PROCEDURE cache.update_cache_db_row_last_updated();
+
+
+--
+-- Raw Bit.ly processing results from S3 cache
+--
+
+CREATE UNLOGGED TABLE cache.s3_bitly_processing_results_cache (
+    s3_bitly_processing_results_cache_id  SERIAL    PRIMARY KEY,
+    object_id                             BIGINT    NOT NULL
+                                                        REFERENCES public.stories (stories_id)
+                                                        ON DELETE CASCADE,
+
+    -- Will be used to purge old cache objects;
+    -- don't forget to update cache.purge_object_caches()
+    db_row_last_updated       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    raw_data                  BYTEA     NOT NULL
+);
+CREATE UNIQUE INDEX s3_bitly_processing_results_cache_object_id
+    ON cache.s3_bitly_processing_results_cache (object_id);
+CREATE INDEX s3_bitly_processing_results_cache_db_row_last_updated
+    ON cache.s3_bitly_processing_results_cache (db_row_last_updated);
+
+ALTER TABLE cache.s3_bitly_processing_results_cache
+    ALTER COLUMN raw_data SET STORAGE EXTERNAL;
+
+CREATE TRIGGER s3_bitly_processing_results_cache_db_row_last_updated_trigger
+    BEFORE INSERT OR UPDATE ON cache.s3_bitly_processing_results_cache
+    FOR EACH ROW EXECUTE PROCEDURE cache.update_cache_db_row_last_updated();

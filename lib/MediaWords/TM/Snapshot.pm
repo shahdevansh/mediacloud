@@ -42,7 +42,6 @@ use warnings;
 use Modern::Perl "2015";
 use MediaWords::CommonLibs;
 
-use Data::Dumper;
 use Date::Format;
 use Encode;
 use File::Temp;
@@ -57,6 +56,7 @@ use MediaWords::DBI::Media;
 use MediaWords::Job::TM::SnapshotTopic;
 use MediaWords::Solr;
 use MediaWords::TM::Model;
+use MediaWords::TM::Snapshot::GraphLayout;
 use MediaWords::Util::CSV;
 use MediaWords::Util::Colors;
 use MediaWords::Util::Config;
@@ -249,8 +249,10 @@ sub restrict_period_stories_to_focus
 
         my $solr_q = $qs->{ query };
 
+        die( "focus boolean query '$solr_q' must include non-space character" ) unless ( $solr_q =~ /[^[:space:]]/ );
+
         my $stories_ids_list = join( ' ', @{ $chunk_stories_ids } );
-        $solr_q = "$solr_q and stories_id:( $stories_ids_list )";
+        $solr_q = "( $solr_q ) and stories_id:( $stories_ids_list )";
 
         my $solr_stories_ids =
           eval { MediaWords::Solr::search_for_stories_ids( $db, { rows => 1000000, q => $solr_q } ) };
@@ -1122,6 +1124,28 @@ sub prune_links_to_min_size
     return $pruned_edges;
 }
 
+# call mediawords.tm.snapshot.graph_layout.layout_gexf
+sub layout_gexf($)
+{
+    my ( $gexf ) = @_;
+
+    my $xml = XML::Simple::XMLout( $gexf, XMLDecl => 1, RootName => 'gexf' );
+
+    my $layout = MediaWords::TM::Snapshot::GraphLayout::layout_gexf( $xml );
+
+    my $nodes = $gexf->{ graph }->[ 0 ]->{ nodes }->{ node };
+
+    for my $node ( @{ $nodes } )
+    {
+        my $pos = $layout->{ $node->{ id } };
+        my ( $x, $y ) = $pos ? @{ $pos } : ( 0, 0 );
+        $node->{ 'viz:position' }->{ x } = $x;
+        $node->{ 'viz:position' }->{ y } = $y;
+    }
+
+    # scale_gexf_nodes( $gexf );
+}
+
 # add layout to gexf by calling graphviz
 sub layout_gexf_with_graphviz
 {
@@ -1232,6 +1256,7 @@ Accepts these $options:
 * max_media -  include only the $max_media media sources with the most inlinks in the timespan (default 500).
 * include_weights - if true, use weighted edges
 * max_links_per_medium - if set, only inclue the top $max_links_per_media out links from each medium, sorted by medium_link_counts.link_count and then inlink_count of the target medium
+* exclude_media_ids - list of media_ids to exclude
 
 =cut
 
@@ -1241,6 +1266,8 @@ sub get_gexf_snapshot
 
     $options->{ max_media }   ||= $MAX_GEXF_MEDIA;
     $options->{ color_field } ||= 'media_type';
+
+    my $exclude_media_ids_list = join( ',', map { int( $_ ) } ( @{ $options->{ exclude_media_ids } }, 0 ) );
 
     my $media = $db->query( <<END, $options->{ max_media } )->hashes;
 select distinct
@@ -1253,6 +1280,8 @@ select distinct
         mlc.normalized_tweet_count
     from snapshot_media_with_types m
         join snapshot_medium_link_counts mlc using ( media_id )
+    where
+        m.media_id not in ( $exclude_media_ids_list )
     order
         by mlc.media_inlink_count desc
     limit ?
@@ -1265,7 +1294,7 @@ END
         'xmlns:xsi'          => "http://www.w3.org/2001/XMLSchema-instance",
         'xmlns:viz'          => "http://www.gexf.net/1.1draft/viz",
         'xsi:schemaLocation' => "http://www.gexf.net/1.2draft http://www.gexf.net/1.2draft/gexf.xsd",
-        'version'            => "1.2"
+        'version'            => "1.2",
     };
 
     my $meta = { 'lastmodifieddate' => Date::Format::time2str( '%Y-%m-%d', time ) };
@@ -1315,7 +1344,13 @@ END
         my $j = 0;
         while ( my ( $name, $type ) = each( %{ $_media_static_gexf_attribute_types } ) )
         {
-            push( @{ $node->{ attvalues }->{ attvalue } }, { for => $j++, value => $medium->{ $name } } );
+            my $value = $medium->{ $name };
+            if ( !defined( $value ) )
+            {
+                $value = ( $type eq 'integer' ) ? 0 : '';
+            }
+
+            push( @{ $node->{ attvalues }->{ attvalue } }, { for => $j++, value => $value } );
         }
 
         my $color_field = $options->{ color_field };
@@ -1327,10 +1362,12 @@ END
 
     scale_node_sizes( $graph->{ nodes }->{ node } );
 
-    layout_gexf_with_graphviz( $gexf );
-    my $layout_gexf = XML::Simple::XMLout( $gexf, XMLDecl => 1, RootName => 'gexf' );
+    layout_gexf( $gexf );
 
-    return $layout_gexf;
+    # layout_gexf_with_graphviz( $gexf );
+    my $xml = XML::Simple::XMLout( $gexf, XMLDecl => 1, RootName => 'gexf' );
+
+    return $xml;
 }
 
 # return true if there are any stories in the current topic_stories_snapshot_ table
@@ -1889,20 +1926,38 @@ SQL
     $db->update_by_id( 'snapshots', $cd->{ snapshots_id }, { searchable => 'f' } );
 }
 
-=head2 snapshot_topic( $db, $topics_id, $note, $bot_policy )
+# die if each of the $periods is not among the $allowed_periods
+sub _validate_periods($$)
+{
+    my ( $periods, $allowed_periods ) = @_;
+
+    for my $period ( @{ $allowed_periods } )
+    {
+        die( "uknown period: '$period'" ) unless ( grep { $period eq $_ } @{ $allowed_periods } );
+    }
+}
+
+=head2 snapshot_topic( $db, $topics_id, $note, $bot_policy, $periods )
 
 Create a snapshot for the given topic.  Optionally pass a note and/or a bot_policy field to the created snapshot.
 
 The bot_policy should be one of 'all', 'no bots', or 'only bots' indicating for twitter topics whether and how to
 filter for bots (a bot is defined as any user tweeting more than 200 post per day).
 
+The periods should be a list of periods to include in the snapshot, where the allowed periods are custom,
+overall, weekly, and monthly.  If periods is not specificied or is empty, all periods will be generated.
+
 =cut
 
-sub snapshot_topic ($$;$$)
+sub snapshot_topic ($$;$$$)
 {
-    my ( $db, $topics_id, $note, $bot_policy ) = @_;
+    my ( $db, $topics_id, $note, $bot_policy, $periods ) = @_;
 
-    my $periods = [ qw(custom overall weekly monthly) ];
+    my $allowed_periods = [ qw(custom overall weekly monthly) ];
+
+    $periods = $allowed_periods if ( !$periods || !@{ $periods } );
+
+    _validate_periods( $periods, $allowed_periods );
 
     my $topic = $db->find_by_id( 'topics', $topics_id )
       || die( "Unable to find topic '$topics_id'" );
